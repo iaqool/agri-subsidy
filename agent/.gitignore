@@ -1,0 +1,24 @@
+# ── Secrets & Keys (NEVER commit these) ─────────────────────────
+.env
+oracle_keypair.json
+admin_key.json
+*.json.key
+*keypair*.json
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+backend.log
+backend.err.log
+frontend.log
+frontend.err.log

@@ -1,0 +1,19 @@
+[package]
+name = "agri_subsidy"
+version = "0.1.0"
+description = "AgriSubsidy AI Oracle — automated agricultural subsidy system on Solana"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "agri_subsidy"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.29.0"
