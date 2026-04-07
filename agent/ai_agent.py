@@ -41,7 +41,7 @@ async def stream_ai_evaluation(
     scores: Dict[str, Any],
 ) -> AsyncGenerator[AILogEntry, None]:
     """
-    Генератор: стримит пошаговое рассуждение GPT-4o через SSE.
+    Генератор: стримит пошаговое рассуждение OpenAI через SSE.
     При ошибке автоматически переключается на fallback.
     """
     if not OPENAI_API_KEY:
@@ -80,7 +80,7 @@ async def stream_ai_evaluation(
     try:
         yield AILogEntry(
             step="🔌 Подключение",
-            content="Подключаюсь к модели GPT-4o. Загружаю агроданные..."
+            content="Подключаюсь к модели OpenAI. Загружаю агроданные..."
         )
         await asyncio.sleep(0.5)
 
@@ -173,7 +173,7 @@ async def stream_ai_evaluation(
 
     except Exception as e:
         yield AILogEntry(
-            step="⚠️ Ошибка GPT-4o",
+            step="⚠️ Ошибка OpenAI",
             content=f"OpenAI недоступен ({str(e)[:80]}). Переключаюсь на локальный агент..."
         )
         await asyncio.sleep(0.5)
@@ -190,7 +190,7 @@ async def get_ai_verdict(
 ) -> EvaluationResult:
     """
     Извлекает вердикт из собранных лог-записей.
-    Если GPT-4o вернул VERDICT — парсим оттуда.
+    Если OpenAI вернул VERDICT — парсим оттуда.
     Иначе используем алгоритмический скор.
     """
     # Ищем финальный вердикт в логах

@@ -21,7 +21,7 @@ export default function ScoreGauge({ score, size = 120 }) {
 
   // Dynamic colour based on score
   const getColor = (s) => {
-    if (s >= 70) return '#4ade80'; // green
+    if (s >= 70) return '#818cf8'; // primary
     if (s >= 45) return '#fbbf24'; // amber
     return '#f87171';              // red
   };

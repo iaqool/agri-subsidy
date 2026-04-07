@@ -19,11 +19,11 @@ ADMIN_PUBKEY = os.getenv("ADMIN_PUBKEY", "")
 
 # Debug: проверяем загрузку при старте
 if not OPENAI_API_KEY:
-    print("⚠️  [config] OPENAI_API_KEY not found — fallback mode will be used")
+    print("[config] OPENAI_API_KEY not found - fallback mode will be used")
 else:
-    print(f"✅  [config] OPENAI_API_KEY loaded ({OPENAI_API_KEY[:12]}...)")
+    print(f"[config] OPENAI_API_KEY loaded ({OPENAI_API_KEY[:12]}...)")
 
 if not OPENWEATHER_API_KEY:
-    print("⚠️  [config] OPENWEATHER_API_KEY not found")
+    print("[config] OPENWEATHER_API_KEY not found")
 else:
-    print(f"✅  [config] OPENWEATHER_API_KEY loaded")
+    print("[config] OPENWEATHER_API_KEY loaded")

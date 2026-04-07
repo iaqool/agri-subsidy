@@ -346,7 +346,7 @@ async def run_evaluation_pipeline(
         await asyncio.sleep(0.3)
 
         # Шаг 4: AI Agent
-        log("🤖 AI Агент", "Передаю данные GPT-4o для финального анализа...")
+        log("🤖 AI Агент", "Передаю данные OpenAI для финального анализа...")
 
         farmer_data = {"wallet": wallet, "lat": lat, "lon": lon}
         ai_logs: list[AILogEntry] = []

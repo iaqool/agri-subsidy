@@ -1,0 +1,25 @@
+# Global secret hygiene
+.env
+.env.*
+**/.env
+**/.env.*
+**/*keypair*.json
+**/oracle_keypair.json
+**/admin_key.json
+**/*.pem
+**/*.key
+
+# Python artifacts
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/.venv/
+**/venv/
+
+# Node artifacts
+**/node_modules/
+**/dist/
+
+# Logs
+*.log
+**/*.log

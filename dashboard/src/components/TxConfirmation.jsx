@@ -10,8 +10,8 @@ export default function TxConfirmation({ txSignature, approved }) {
     <div style={{
       marginTop: 12,
       padding: '12px 14px',
-      background: approved ? 'var(--clr-green-dim)' : 'var(--clr-red-dim)',
-      border: `1px solid ${approved ? 'rgba(74,222,128,0.20)' : 'rgba(248,113,113,0.20)'}`,
+      background: approved ? 'var(--clr-primary-dim)' : 'var(--clr-red-dim)',
+      border: `1px solid ${approved ? 'rgba(99,102,241,0.26)' : 'rgba(248,113,113,0.20)'}`,
       borderRadius: 10,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       gap: 10, flexWrap: 'wrap',
@@ -23,7 +23,7 @@ export default function TxConfirmation({ txSignature, approved }) {
             {approved ? 'Transaction Submitted' : 'Rejected — No TX'}
           </p>
           {approved && (
-            <p className="mono" style={{ fontSize: 12, color: 'var(--clr-green)' }}>
+            <p className="mono" style={{ fontSize: 12, color: 'var(--clr-accent)' }}>
               {shortSig}
             </p>
           )}
@@ -38,18 +38,18 @@ export default function TxConfirmation({ txSignature, approved }) {
           id={`explorer-link-${txSignature?.slice(0, 8)}`}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
-            fontSize: 12, fontWeight: 600, color: 'var(--clr-green)',
+            fontSize: 12, fontWeight: 600, color: 'var(--clr-accent)',
             textDecoration: 'none', padding: '5px 10px',
-            background: 'rgba(74,222,128,0.10)', borderRadius: 6,
-            border: '1px solid rgba(74,222,128,0.20)',
+            background: 'rgba(99,102,241,0.12)', borderRadius: 6,
+            border: '1px solid rgba(99,102,241,0.28)',
             transition: 'all 0.15s ease',
           }}
           onMouseEnter={e => {
-            e.currentTarget.style.background = 'rgba(74,222,128,0.20)';
+            e.currentTarget.style.background = 'rgba(99,102,241,0.20)';
             e.currentTarget.style.transform = 'translateY(-1px)';
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.background = 'rgba(74,222,128,0.10)';
+            e.currentTarget.style.background = 'rgba(99,102,241,0.12)';
             e.currentTarget.style.transform = 'translateY(0)';
           }}
         >

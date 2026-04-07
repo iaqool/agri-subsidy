@@ -34,9 +34,10 @@ export default function FarmerCard({ farmer, selected, onSelect, onEvaluate, eva
     position: 'relative',
     overflow: 'hidden',
     transition: 'all 0.25s ease',
+    background: 'linear-gradient(160deg, rgba(99,102,241,.08), rgba(12,12,24,.66))',
     ...(selected ? {
-      borderColor: 'rgba(74,222,128,0.45)',
-      boxShadow: '0 0 0 1px rgba(74,222,128,0.20), 0 8px 32px rgba(0,0,0,0.4)',
+      borderColor: 'rgba(99,102,241,0.5)',
+      boxShadow: '0 0 0 1px rgba(99,102,241,0.22), 0 8px 32px rgba(0,0,0,0.4)',
     } : {}),
   };
 
@@ -51,7 +52,7 @@ export default function FarmerCard({ farmer, selected, onSelect, onEvaluate, eva
       {selected && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-          background: 'linear-gradient(90deg, transparent, var(--clr-green), transparent)',
+          background: 'linear-gradient(90deg, transparent, var(--clr-primary), transparent)',
         }} />
       )}
 
@@ -93,8 +94,8 @@ export default function FarmerCard({ farmer, selected, onSelect, onEvaluate, eva
           <ScoreGauge score={farmer.score} size={72} />
           <div>
             <p style={{ fontSize: 11, color: 'var(--clr-text-3)' }}>AI Score</p>
-            <p style={{ fontSize: 12, color: farmer.status === 'approved' ? 'var(--clr-green)' : 'var(--clr-red)', fontWeight: 600 }}>
-              {farmer.status === 'approved' ? 'Subsidy approved' : 'Subsidy denied'}
+            <p style={{ fontSize: 12, color: farmer.status === 'approved' ? 'var(--clr-accent)' : 'var(--clr-red)', fontWeight: 600 }}>
+              {farmer.status === 'approved' ? 'Relief approved' : 'Relief denied'}
             </p>
           </div>
         </div>

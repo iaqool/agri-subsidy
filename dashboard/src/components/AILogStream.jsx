@@ -1,20 +1,20 @@
 import { useEffect, useRef } from 'react';
 
 const STEP_ICONS = {
-  '🌍': '#2dd4bf',
-  '🌤️': '#2dd4bf',
-  '🛰️': '#2dd4bf',
-  '🌿': '#4ade80',
+  '🌍': '#22d3ee',
+  '🌤️': '#22d3ee',
+  '🛰️': '#22d3ee',
+  '🌿': '#818cf8',
   '⚙️': '#94a3b8',
   '📊': '#fbbf24',
   '🤖': '#a78bfa',
   '🔌': '#a78bfa',
-  '📡': '#2dd4bf',
-  '✅': '#4ade80',
+  '📡': '#22d3ee',
+  '✅': '#818cf8',
   '❌': '#f87171',
   '⚠️': '#fbbf24',
   '🔄': '#fbbf24',
-  '⛓️': '#4ade80',
+  '⛓️': '#818cf8',
   '🚫': '#f87171',
 };
 
@@ -46,7 +46,7 @@ export default function AILogStream({ logs, done, running }) {
           <span style={{ fontSize: 17 }}>🤖</span>
           <div>
             <p style={{ fontWeight: 700, fontSize: 14 }}>AI Reasoning Log</p>
-            <p style={{ fontSize: 11, color: 'var(--clr-text-3)' }}>GPT-4o chain-of-thought · real-time stream</p>
+            <p style={{ fontSize: 11, color: 'var(--clr-text-3)' }}>OpenAI chain-of-thought · real-time stream</p>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -57,7 +57,7 @@ export default function AILogStream({ logs, done, running }) {
             </>
           )}
           {done && (
-            <span style={{ fontSize: 11, color: 'var(--clr-green)' }}>● Complete</span>
+            <span style={{ fontSize: 11, color: 'var(--clr-accent)' }}>● Complete</span>
           )}
           {!running && !done && (
             <span style={{ fontSize: 11, color: 'var(--clr-text-3)' }}>Idle</span>
@@ -121,7 +121,7 @@ export default function AILogStream({ logs, done, running }) {
             <span style={{
               display: 'inline-block',
               width: 8, height: 14,
-              background: 'var(--clr-green)',
+              background: 'var(--clr-primary)',
               borderRadius: 2,
               animation: 'pulse-dot 0.9s infinite',
             }} />

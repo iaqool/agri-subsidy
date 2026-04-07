@@ -189,17 +189,17 @@ async def release_subsidy(
     # LIVE mode — если контракт задеплоен
     if PROGRAM_ID:
         try:
-            print(f"🔗 [bridge] Sending LIVE TX → program={PROGRAM_ID[:8]}...")
+            print(f"[bridge] Sending LIVE TX -> program={PROGRAM_ID[:8]}...")
             sig = await _send_live_transaction(farmer_pubkey, amount_lamports, ai_score)
-            print(f"✅ [bridge] TX confirmed: {sig[:16]}...")
+            print(f"[bridge] TX confirmed: {sig[:16]}...")
             return SolanaBridgeResult(sig, is_mock=False, amount_sol=amount_sol)
         except Exception as e:
-            print(f"⚠️  [bridge] Live TX failed ({e}), falling back to mock")
+            print(f"[bridge] Live TX failed ({e}), falling back to mock")
 
     # MOCK mode — демо без реального контракта
     await asyncio.sleep(random.uniform(0.8, 1.5))  # Имитация latency RPC
     sig = _mock_signature()
-    print(f"🎭 [bridge] MOCK TX generated: {sig[:16]}...")
+    print(f"[bridge] MOCK TX generated: {sig[:16]}...")
     return SolanaBridgeResult(sig, is_mock=True, amount_sol=amount_sol)
 
 

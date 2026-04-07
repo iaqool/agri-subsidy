@@ -2,6 +2,33 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 const API_BASE = 'http://127.0.0.1:8080';
 
+async function requestJson(path, options) {
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE}${path}`, options);
+  } catch (error) {
+    throw new Error('Dala API is offline. Start the backend on http://127.0.0.1:8080.');
+  }
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.detail ||
+      payload?.message ||
+      `Request failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
 /**
  * Custom hook for Server-Sent Events streaming.
  * Connects to /api/stream/{evaluationId} and collects AI log entries.
@@ -71,26 +98,22 @@ export function useSSE(evaluationId) {
  */
 export const api = {
   async seedDemo() {
-    const r = await fetch(`${API_BASE}/api/demo/seed`, { method: 'POST' });
-    return r.json();
+    return requestJson('/api/demo/seed', { method: 'POST' });
   },
 
   async getFarmers() {
-    const r = await fetch(`${API_BASE}/api/farmers`);
-    return r.json();
+    return requestJson('/api/farmers');
   },
 
   async getStats() {
-    const r = await fetch(`${API_BASE}/api/stats`);
-    return r.json();
+    return requestJson('/api/stats');
   },
 
   async evaluate(wallet, lat, lon) {
-    const r = await fetch(`${API_BASE}/api/evaluate`, {
+    return requestJson('/api/evaluate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ wallet_address: wallet, lat, lon }),
     });
-    return r.json();
   },
 };
