@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const API_BASE = 'http://127.0.0.1:8080';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
 
 async function requestJson(path, options) {
   let response;
@@ -8,7 +8,9 @@ async function requestJson(path, options) {
   try {
     response = await fetch(`${API_BASE}${path}`, options);
   } catch (error) {
-    throw new Error('Dala API is offline. Start the backend on http://127.0.0.1:8080.');
+    throw new Error(
+      `Dala API is offline. Check VITE_API_BASE_URL or start backend on ${API_BASE}.`,
+    );
   }
 
   let payload = null;
