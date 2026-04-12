@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
+const rawApiBase = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8080').trim();
+const normalizedApiBase = /^https?:\/\//i.test(rawApiBase)
+  ? rawApiBase
+  : `https://${rawApiBase}`;
+const API_BASE = normalizedApiBase.replace(/\/$/, '');
 
 async function requestJson(path, options) {
   let response;
