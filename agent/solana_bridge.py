@@ -13,7 +13,13 @@ import json
 import random
 from pathlib import Path
 
-from config import SOLANA_RPC_URL, PROGRAM_ID, ORACLE_KEYPAIR, ADMIN_PUBKEY
+from config import (
+    SOLANA_RPC_URL,
+    PROGRAM_ID,
+    ORACLE_KEYPAIR,
+    ORACLE_KEYPAIR_JSON,
+    ADMIN_PUBKEY,
+)
 from solders.system_program import ID as SYS_PROGRAM_ID
 
 
@@ -55,6 +61,7 @@ async def _send_live_transaction(
     Реальный вызов контракта release_funds_by_oracle через solders.
     Требует:
       - PROGRAM_ID в .env
+      - ORACLE_KEYPAIR_JSON (предпочтительно для cloud), либо
       - ORACLE_KEYPAIR_PATH — путь к keypair JSON (solana-keygen new)
     """
     try:
@@ -67,14 +74,25 @@ async def _send_live_transaction(
         import struct
         import httpx
 
-        # Загружаем Oracle keypair
-        keypair_path = Path(ORACLE_KEYPAIR) if ORACLE_KEYPAIR else None
-        if not keypair_path or not keypair_path.exists():
-            raise FileNotFoundError(f"Oracle keypair not found at: {ORACLE_KEYPAIR}")
-
-        with open(keypair_path) as f:
-            keypair_bytes = bytes(json.load(f))
-        oracle_kp = Keypair.from_bytes(keypair_bytes)
+        # Загружаем Oracle keypair: сперва из ORACLE_KEYPAIR_JSON, иначе из файла
+        if ORACLE_KEYPAIR_JSON:
+            try:
+                keypair_bytes = bytes(json.loads(ORACLE_KEYPAIR_JSON))
+                oracle_kp = Keypair.from_bytes(keypair_bytes)
+            except Exception as exc:
+                raise ValueError(
+                    "Invalid ORACLE_KEYPAIR_JSON. Expected JSON array of 64 integers."
+                ) from exc
+        else:
+            keypair_path = Path(ORACLE_KEYPAIR) if ORACLE_KEYPAIR else None
+            if not keypair_path or not keypair_path.exists():
+                raise FileNotFoundError(
+                    "Oracle keypair not found. Set ORACLE_KEYPAIR_JSON "
+                    "or valid ORACLE_KEYPAIR_PATH."
+                )
+            with open(keypair_path) as f:
+                keypair_bytes = bytes(json.load(f))
+            oracle_kp = Keypair.from_bytes(keypair_bytes)
 
         program_id = Pubkey.from_string(PROGRAM_ID)
         farmer_pk = Pubkey.from_string(farmer_pubkey)

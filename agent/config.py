@@ -15,6 +15,9 @@ PROGRAM_ID = os.getenv("PROGRAM_ID", "")  # Заполнить после деп
 ORACLE_KEYPAIR = os.getenv(
     "ORACLE_KEYPAIR_PATH", ""
 )  # Путь к keypair JSON (для bridge)
+ORACLE_KEYPAIR_JSON = os.getenv(
+    "ORACLE_KEYPAIR_JSON", ""
+)  # JSON-массив байт keypair (для cloud deploy без файла)
 ADMIN_PUBKEY = os.getenv("ADMIN_PUBKEY", "")
 
 # Debug: проверяем загрузку при старте
