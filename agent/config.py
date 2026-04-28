@@ -20,13 +20,12 @@ ORACLE_KEYPAIR_JSON = os.getenv(
 )  # JSON-массив байт keypair (для cloud deploy без файла)
 ADMIN_PUBKEY = os.getenv("ADMIN_PUBKEY", "")
 
-# Debug: проверяем загрузку при старте
 if not OPENAI_API_KEY:
     print("[config] OPENAI_API_KEY not found - fallback mode will be used")
 else:
-    print(f"[config] OPENAI_API_KEY loaded ({OPENAI_API_KEY[:12]}...)")
+    print("[config] OPENAI_API_KEY loaded (***)")
 
 if not OPENWEATHER_API_KEY:
     print("[config] OPENWEATHER_API_KEY not found")
 else:
-    print("[config] OPENWEATHER_API_KEY loaded")
+    print("[config] OPENWEATHER_API_KEY loaded (***)")

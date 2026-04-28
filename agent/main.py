@@ -1,13 +1,17 @@
 import asyncio
+import os
+import re
 import uuid
 import json
+import logging
+from collections import OrderedDict
 from typing import Dict
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from models import FarmerRegistration, EvaluationResult, AILogEntry, FarmerStatus
 from weather_service import fetch_weather_data
@@ -16,28 +20,72 @@ from scoring_engine import calculate_composite_score
 from ai_agent import stream_ai_evaluation, get_ai_verdict
 from solana_bridge import release_subsidy, get_transaction_status, SUBSIDY_AMOUNT_SOL
 
+logger = logging.getLogger(__name__)
+
+# Base58 alphabet used by Solana
+_B58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+
+def _is_valid_solana_address(addr: str) -> bool:
+    return bool(_B58_RE.match(addr))
+
+
+# ─── Capacity Limits ─────────────────────────────────────────────────────────────
+MAX_FARMERS = int(os.getenv("MAX_FARMERS", "10000"))
+MAX_EVALUATIONS = int(os.getenv("MAX_EVALUATIONS", "50000"))
+MAX_CONCURRENT_SSE = int(os.getenv("MAX_CONCURRENT_SSE", "200"))
+_active_sse_connections = 0
+
 
 # ─── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="AgriSubsidy AI Oracle",
     description="AI-powered agricultural subsidy decision system on Solana",
     version="0.1.0",
+    docs_url="/docs" if os.getenv("ENABLE_DOCS", "").lower() in ("1", "true") else None,
+    redoc_url=None,
+    openapi_url=(
+        "/openapi.json"
+        if os.getenv("ENABLE_DOCS", "").lower() in ("1", "true")
+        else None
+    ),
 )
+
+_allowed_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+).split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшне заменить на конкретный фронтенд URL
+    allow_origins=[o.strip() for o in _allowed_origins if o.strip()],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
 # ─── In-Memory State (MVP) ───────────────────────────────────────────────────────
 # В продакшне заменить на PostgreSQL/Redis
 farmers_db: Dict[str, FarmerStatus] = {}
-evaluations_db: Dict[str, dict] = {}  # evaluation_id -> {logs, result, ...}
+
+
+class _LRUEvalDB(OrderedDict):
+    """Bounded dict that evicts oldest entries when full."""
+
+    def __init__(self, maxsize: int = MAX_EVALUATIONS):
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        while len(self) > self._maxsize:
+            self.popitem(last=False)
+
+
+evaluations_db: _LRUEvalDB = _LRUEvalDB()  # evaluation_id -> {logs, result, ...}
 total_disbursed_sol: float = 0.0  # Накопительная сумма выплат
+_eval_lock = asyncio.Lock()
 
 
 # ─── Pydantic Schemas ────────────────────────────────────────────────────────────
@@ -45,6 +93,28 @@ class EvaluateRequest(BaseModel):
     wallet_address: str
     lat: float
     lon: float
+
+    @field_validator("wallet_address")
+    @classmethod
+    def validate_wallet(cls, v: str) -> str:
+        v = v.strip()
+        if not _is_valid_solana_address(v):
+            raise ValueError("Invalid Solana wallet address")
+        return v
+
+    @field_validator("lat")
+    @classmethod
+    def validate_lat(cls, v: float) -> float:
+        if not -90 <= v <= 90:
+            raise ValueError("Latitude must be between -90 and 90")
+        return v
+
+    @field_validator("lon")
+    @classmethod
+    def validate_lon(cls, v: float) -> float:
+        if not -180 <= v <= 180:
+            raise ValueError("Longitude must be between -180 and 180")
+        return v
 
 
 class EvaluateResponse(BaseModel):
@@ -96,6 +166,8 @@ DEMO_FARMERS = [
 @app.post("/api/demo/seed", summary="Засеять демо-данными")
 async def seed_demo_data():
     """Инициализирует 5 демо-фермеров для демонстрации."""
+    if os.getenv("DISABLE_DEMO", "").lower() in ("1", "true"):
+        raise HTTPException(status_code=403, detail="Demo endpoints disabled in production")
     for f in DEMO_FARMERS:
         farmers_db[f["wallet"]] = FarmerStatus(
             wallet=f["wallet"],
@@ -120,6 +192,8 @@ async def get_farmers():
 )
 async def register_farmer(data: FarmerRegistration):
     """Регистрирует нового фермера (или обновляет существующего)."""
+    if len(farmers_db) >= MAX_FARMERS and data.wallet_address not in farmers_db:
+        raise HTTPException(status_code=429, detail="Farmer limit reached")
     farmer = FarmerStatus(
         wallet=data.wallet_address,
         lat=data.region_lat,
@@ -136,10 +210,14 @@ async def start_evaluation(req: EvaluateRequest):
     Запускает асинхронный цикл оценки фермера.
     Возвращает evaluation_id для подключения к SSE-стриму.
     """
+    if len(evaluations_db) >= MAX_EVALUATIONS:
+        raise HTTPException(status_code=429, detail="Evaluation capacity reached, try later")
+
     evaluation_id = str(uuid.uuid4())
 
-    # Регистрируем фермера если новый
     if req.wallet_address not in farmers_db:
+        if len(farmers_db) >= MAX_FARMERS:
+            raise HTTPException(status_code=429, detail="Farmer limit reached")
         farmers_db[req.wallet_address] = FarmerStatus(
             wallet=req.wallet_address,
             lat=req.lat,
@@ -147,7 +225,6 @@ async def start_evaluation(req: EvaluateRequest):
             status="pending",
         )
 
-    # Создаём запись для evaluation
     evaluations_db[evaluation_id] = {
         "wallet": req.wallet_address,
         "lat": req.lat,
@@ -158,7 +235,6 @@ async def start_evaluation(req: EvaluateRequest):
         "started_at": datetime.utcnow().isoformat(),
     }
 
-    # Запускаем оценку в фоне
     asyncio.create_task(
         run_evaluation_pipeline(evaluation_id, req.wallet_address, req.lat, req.lon)
     )
@@ -175,37 +251,43 @@ async def stream_evaluation(evaluation_id: str):
     Server-Sent Events endpoint.
     Стримит пошаговые рассуждения ИИ в реальном времени.
     """
+    global _active_sse_connections
     if evaluation_id not in evaluations_db:
         raise HTTPException(status_code=404, detail="Evaluation не найден")
+    if _active_sse_connections >= MAX_CONCURRENT_SSE:
+        raise HTTPException(status_code=429, detail="Too many SSE connections")
 
     async def event_generator():
-        sent_count = 0
-        max_wait = 120  # 2 минуты максимум
-        elapsed = 0
+        global _active_sse_connections
+        _active_sse_connections += 1
+        try:
+            sent_count = 0
+            max_wait = 120
+            elapsed = 0
 
-        while elapsed < max_wait:
-            eval_data = evaluations_db.get(evaluation_id, {})
-            logs = eval_data.get("logs", [])
+            while elapsed < max_wait:
+                eval_data = evaluations_db.get(evaluation_id, {})
+                logs = eval_data.get("logs", [])
 
-            # Отправляем новые записи
-            while sent_count < len(logs):
-                entry = logs[sent_count]
-                data = json.dumps(entry, ensure_ascii=False)
-                yield f"data: {data}\n\n"
-                sent_count += 1
+                while sent_count < len(logs):
+                    entry = logs[sent_count]
+                    data = json.dumps(entry, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+                    sent_count += 1
 
-            # Если оценка завершена — шлём финальное событие
-            if eval_data.get("status") == "done":
-                result = eval_data.get("result", {})
-                yield f"event: done\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
-                break
+                if eval_data.get("status") == "done":
+                    result = eval_data.get("result", {})
+                    yield f"event: done\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
+                    break
 
-            if eval_data.get("status") == "error":
-                yield f"event: error\ndata: {json.dumps({'error': eval_data.get('error', 'Unknown')})}\n\n"
-                break
+                if eval_data.get("status") == "error":
+                    yield f"event: error\ndata: {json.dumps({'error': 'Evaluation failed'})}\n\n"
+                    break
 
-            await asyncio.sleep(0.3)
-            elapsed += 0.3
+                await asyncio.sleep(0.3)
+                elapsed += 0.3
+        finally:
+            _active_sse_connections -= 1
 
     return StreamingResponse(
         event_generator(),
@@ -235,9 +317,14 @@ async def get_stats():
     )
 
 
+_TX_SIG_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{64,88}$")
+
+
 @app.get("/api/tx/{signature}", summary="Статус транзакции")
 async def check_tx_status(signature: str):
     """Проверяет статус Solana транзакции на Devnet."""
+    if not _TX_SIG_RE.match(signature):
+        raise HTTPException(status_code=400, detail="Invalid transaction signature")
     return await get_transaction_status(signature)
 
 
@@ -246,7 +333,12 @@ async def get_evaluation_result(evaluation_id: str):
     """Возвращает полный результат завершённой оценки."""
     if evaluation_id not in evaluations_db:
         raise HTTPException(status_code=404, detail="Evaluation не найден")
-    return evaluations_db[evaluation_id]
+    data = evaluations_db[evaluation_id]
+    safe = {
+        k: v for k, v in data.items()
+        if k not in ("traceback",)
+    }
+    return safe
 
 
 @app.get("/health", summary="Health check")
@@ -285,15 +377,6 @@ async def run_evaluation_pipeline(
         )
         weather = await fetch_weather_data(lat, lon)
 
-        # [DEMO HACK] Жестко хардкодим засуху для Актюбинской области (DemoFarm4)
-        if lat == 50.3 and lon == 57.2:
-            weather = {
-                "temperature": 45.0,
-                "humidity": 5.0,
-                "description": "extreme drought",
-                "rain_1h": 0.0,
-            }
-
         if "error" in weather:
             log(
                 "⚠️ Погода",
@@ -318,14 +401,6 @@ async def run_evaluation_pipeline(
         log("🛰️ Запрос NDVI", "Получаю спутниковые данные NDVI...")
         ndvi = await fetch_historical_ndvi(lat, lon)
         
-        # [DEMO HACK] Катастрофически низкий NDVI для Актюбинской области
-        if lat == 50.3 and lon == 57.2:
-            ndvi = {
-                "current_ndvi": 0.15,
-                "historical_avg": 0.65,
-                "alert": "critical_vegetation_loss",
-            }
-            
         log(
             "🌿 NDVI получен",
             f"Текущий NDVI: {ndvi['current_ndvi']}, историческая норма: {ndvi['historical_avg']}, "
@@ -379,9 +454,9 @@ async def run_evaluation_pipeline(
             if wallet in farmers_db:
                 farmers_db[wallet].tx_signature = bridge_result.signature
 
-            # Обновляем глобальную сумму выплат
-            global total_disbursed_sol
-            total_disbursed_sol += bridge_result.amount_sol
+            async with _eval_lock:
+                global total_disbursed_sol
+                total_disbursed_sol += bridge_result.amount_sol
 
             mode_label = "[MOCK]" if bridge_result.is_mock else "[LIVE]"
             log(
@@ -398,10 +473,10 @@ async def run_evaluation_pipeline(
         eval_data["completed_at"] = datetime.utcnow().isoformat()
 
     except Exception as e:
-        import traceback
+        import traceback as tb
 
+        logger.error("Evaluation %s failed: %s", evaluation_id, e, exc_info=True)
         eval_data["status"] = "error"
-        eval_data["error"] = str(e)
-        eval_data["traceback"] = traceback.format_exc()
+        eval_data["error"] = "Internal evaluation error"
         if wallet in farmers_db:
             farmers_db[wallet].status = "pending"
