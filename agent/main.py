@@ -71,16 +71,29 @@ farmers_db: Dict[str, FarmerStatus] = {}
 
 
 class _LRUEvalDB(OrderedDict):
-    """Bounded dict that evicts oldest entries when full."""
+    """Bounded dict that only evicts completed evaluations when full."""
 
     def __init__(self, maxsize: int = MAX_EVALUATIONS):
         super().__init__()
         self._maxsize = maxsize
 
-    def __setitem__(self, key, value):
-        super().__setitem__(key, value)
-        while len(self) > self._maxsize:
-            self.popitem(last=False)
+    def try_make_room(self) -> bool:
+        """Evict oldest *completed* evaluations until under capacity.
+
+        Returns True if room is available, False if all slots hold
+        in-flight evaluations (safe to reject with 429).
+        """
+        while len(self) >= self._maxsize:
+            evicted = False
+            for key in list(self):
+                entry = self[key]
+                if isinstance(entry, dict) and entry.get("status") in ("done", "error"):
+                    del self[key]
+                    evicted = True
+                    break
+            if not evicted:
+                return False
+        return True
 
 
 evaluations_db: _LRUEvalDB = _LRUEvalDB()  # evaluation_id -> {logs, result, ...}
@@ -210,7 +223,7 @@ async def start_evaluation(req: EvaluateRequest):
     Запускает асинхронный цикл оценки фермера.
     Возвращает evaluation_id для подключения к SSE-стриму.
     """
-    if len(evaluations_db) > MAX_EVALUATIONS:
+    if not evaluations_db.try_make_room():
         raise HTTPException(status_code=429, detail="Evaluation capacity reached, try later")
 
     evaluation_id = str(uuid.uuid4())
