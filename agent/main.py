@@ -270,10 +270,9 @@ async def stream_evaluation(evaluation_id: str):
     if _active_sse_connections >= MAX_CONCURRENT_SSE:
         raise HTTPException(status_code=429, detail="Too many SSE connections")
 
-    _active_sse_connections += 1
-
     async def event_generator():
         global _active_sse_connections
+        _active_sse_connections += 1
         try:
             sent_count = 0
             max_wait = 120
