@@ -63,17 +63,27 @@ pub mod agri_subsidy {
         amount: u64,
         ai_score: u8,
     ) -> Result<()> {
-        // Проверки безопасности
         require!(ai_score >= 55, AgriError::ScoreBelowThreshold);
         require!(amount > 0, AgriError::InvalidAmount);
         require!(amount <= 5_000_000_000, AgriError::AmountTooLarge); // max 5 SOL
         require!(ctx.accounts.pool.is_active, AgriError::PoolNotActive);
 
-        // Проверяем что Oracle = тот, кто был задан при инициализации
         require!(
             ctx.accounts.pool.oracle == ctx.accounts.oracle.key(),
             AgriError::UnauthorizedOracle
         );
+
+        // Prevent double payout — farmer must be in Pending status
+        require!(
+            ctx.accounts.farmer_account.status == FarmerStatus::Pending,
+            AgriError::AlreadyProcessed
+        );
+
+        // Enforce per-farmer cumulative cap (5 SOL)
+        let new_total = ctx.accounts.farmer_account.total_received
+            .checked_add(amount)
+            .ok_or(AgriError::AmountTooLarge)?;
+        require!(new_total <= 5_000_000_000, AgriError::AmountTooLarge);
 
         // Трансфер SOL из pool-PDA → кошелёк фермера
         let pool = &ctx.accounts.pool;
@@ -82,16 +92,15 @@ pub mod agri_subsidy {
             pool.authority.as_ref(),
             &[pool.bump],
         ];
-        let signer_seeds = &[&pool_seeds[..]];
+        let _signer_seeds = &[&pool_seeds[..]];
 
         **ctx.accounts.pool.to_account_info().try_borrow_mut_lamports()? -= amount;
         **ctx.accounts.farmer_wallet.to_account_info().try_borrow_mut_lamports()? += amount;
 
-        // Обновляем состояние фермера
         let farmer = &mut ctx.accounts.farmer_account;
         farmer.status = FarmerStatus::Approved;
         farmer.score  = ai_score;
-        farmer.total_received = farmer.total_received.checked_add(amount).unwrap();
+        farmer.total_received = new_total;
 
         // Обновляем пул
         let pool = &mut ctx.accounts.pool;
@@ -271,6 +280,7 @@ pub struct RejectFarmer<'info> {
         mut,
         seeds = [b"farmer", pool.key().as_ref(), farmer_wallet.key().as_ref()],
         bump,
+        constraint = farmer_account.wallet == farmer_wallet.key() @ AgriError::WalletMismatch,
     )]
     pub farmer_account: Account<'info, FarmerAccount>,
 
@@ -333,4 +343,7 @@ pub enum AgriError {
 
     #[msg("Region code must be 32 characters or less")]
     RegionCodeTooLong,
+
+    #[msg("Farmer has already been processed (approved or rejected)")]
+    AlreadyProcessed,
 }
