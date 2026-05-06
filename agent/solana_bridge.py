@@ -51,6 +51,134 @@ def _mock_tx_url(sig: str) -> str:
 # ── Solders Live Bridge ───────────────────────────────────────────────────────
 
 
+def _load_oracle_keypair():
+    """Загружает Oracle keypair: сперва из ORACLE_KEYPAIR_JSON, иначе из файла."""
+    from solders.keypair import Keypair
+
+    if ORACLE_KEYPAIR_JSON:
+        try:
+            keypair_bytes = bytes(json.loads(ORACLE_KEYPAIR_JSON))
+            return Keypair.from_bytes(keypair_bytes)
+        except Exception as exc:
+            raise ValueError(
+                "Invalid ORACLE_KEYPAIR_JSON. Expected JSON array of 64 integers."
+            ) from exc
+    keypair_path = Path(ORACLE_KEYPAIR) if ORACLE_KEYPAIR else None
+    if not keypair_path or not keypair_path.exists():
+        raise FileNotFoundError(
+            "Oracle keypair not found. Set ORACLE_KEYPAIR_JSON "
+            "or valid ORACLE_KEYPAIR_PATH."
+        )
+    with open(keypair_path) as f:
+        keypair_bytes = bytes(json.load(f))
+    return Keypair.from_bytes(keypair_bytes)
+
+
+async def _account_exists(client, pubkey_str: str) -> bool:
+    """Проверяет через getAccountInfo, существует ли PDA на Devnet."""
+    resp = await client.post(
+        SOLANA_RPC_URL,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [pubkey_str, {"encoding": "base64"}],
+        },
+    )
+    data = resp.json()
+    return bool(data.get("result", {}).get("value"))
+
+
+def _encode_string_borsh(s: str) -> bytes:
+    """Borsh-style string: u32 little-endian length prefix + UTF-8 bytes."""
+    import struct
+
+    encoded = s.encode("utf-8")
+    return struct.pack("<I", len(encoded)) + encoded
+
+
+async def _send_register_farmer(
+    client,
+    oracle_kp,
+    farmer_pk,
+    farmer_pda,
+    pool_pda,
+    program_id,
+    region_code: str,
+) -> str:
+    """Отправляет register_farmer(region_code) и ждёт подтверждения. Оракул платит ренту."""
+    from solders.transaction import Transaction
+    from solders.instruction import Instruction, AccountMeta
+    from solders.hash import Hash
+    from solders.message import Message
+    import base64
+
+    discriminator = _anchor_discriminator("register_farmer")
+    data = discriminator + _encode_string_borsh(region_code[:32])
+
+    accounts = [
+        AccountMeta(pubkey=oracle_kp.pubkey(), is_signer=True, is_writable=True),  # payer
+        AccountMeta(pubkey=farmer_pk, is_signer=False, is_writable=False),  # farmer_wallet
+        AccountMeta(pubkey=farmer_pda, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=pool_pda, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=SYS_PROGRAM_ID, is_signer=False, is_writable=False),
+    ]
+    instruction = Instruction(program_id=program_id, accounts=accounts, data=bytes(data))
+
+    rpc_resp = await client.post(
+        SOLANA_RPC_URL,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getLatestBlockhash",
+            "params": [{"commitment": "finalized"}],
+        },
+    )
+    blockhash_str = rpc_resp.json()["result"]["value"]["blockhash"]
+    recent_blockhash = Hash.from_string(blockhash_str)
+
+    msg = Message([instruction], oracle_kp.pubkey())
+    tx = Transaction([oracle_kp], msg, recent_blockhash)
+    tx_b64 = base64.b64encode(bytes(tx)).decode()
+
+    send_resp = await client.post(
+        SOLANA_RPC_URL,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "sendTransaction",
+            "params": [
+                tx_b64,
+                {"encoding": "base64", "preflightCommitment": "confirmed"},
+            ],
+        },
+    )
+    result = send_resp.json()
+    if "error" in result:
+        raise RuntimeError(f"register_farmer RPC error: {result['error']}")
+    sig = result["result"]
+    print(f"[bridge] register_farmer TX: {sig[:16]}...")
+
+    # Ждём подтверждения, чтобы release_funds_by_oracle видела PDA.
+    for _ in range(20):  # до ~10с
+        await asyncio.sleep(0.5)
+        status_resp = await client.post(
+            SOLANA_RPC_URL,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignatureStatuses",
+                "params": [[sig], {"searchTransactionHistory": True}],
+            },
+        )
+        st = status_resp.json().get("result", {}).get("value", [None])[0]
+        if st and st.get("confirmationStatus") in ("confirmed", "finalized"):
+            return sig
+        if st and st.get("err"):
+            raise RuntimeError(f"register_farmer failed: {st['err']}")
+    raise TimeoutError("register_farmer not confirmed within 10s")
+
+
 async def _send_live_transaction(
     farmer_pubkey: str,
     amount_lamports: int,
@@ -62,10 +190,12 @@ async def _send_live_transaction(
       - PROGRAM_ID в .env
       - ORACLE_KEYPAIR_JSON (предпочтительно для cloud), либо
       - ORACLE_KEYPAIR_PATH — путь к keypair JSON (solana-keygen new)
+
+    Если farmer PDA ещё не инициализирован на Devnet, сначала вызывает
+    register_farmer (оракул платит rent), затем release_funds_by_oracle.
     """
     try:
         from solders.pubkey import Pubkey
-        from solders.keypair import Keypair
         from solders.transaction import Transaction
         from solders.instruction import Instruction, AccountMeta
         from solders.hash import Hash
@@ -73,25 +203,10 @@ async def _send_live_transaction(
         import struct
         import httpx
 
-        # Загружаем Oracle keypair: сперва из ORACLE_KEYPAIR_JSON, иначе из файла
-        if ORACLE_KEYPAIR_JSON:
-            try:
-                keypair_bytes = bytes(json.loads(ORACLE_KEYPAIR_JSON))
-                oracle_kp = Keypair.from_bytes(keypair_bytes)
-            except Exception as exc:
-                raise ValueError(
-                    "Invalid ORACLE_KEYPAIR_JSON. Expected JSON array of 64 integers."
-                ) from exc
-        else:
-            keypair_path = Path(ORACLE_KEYPAIR) if ORACLE_KEYPAIR else None
-            if not keypair_path or not keypair_path.exists():
-                raise FileNotFoundError(
-                    "Oracle keypair not found. Set ORACLE_KEYPAIR_JSON "
-                    "or valid ORACLE_KEYPAIR_PATH."
-                )
-            with open(keypair_path) as f:
-                keypair_bytes = bytes(json.load(f))
-            oracle_kp = Keypair.from_bytes(keypair_bytes)
+        oracle_kp = _load_oracle_keypair()
+
+        if not ADMIN_PUBKEY:
+            raise ValueError("ADMIN_PUBKEY env var is required for LIVE TX (pool PDA seed).")
 
         program_id = Pubkey.from_string(PROGRAM_ID)
         farmer_pk = Pubkey.from_string(farmer_pubkey)
@@ -103,28 +218,39 @@ async def _send_live_transaction(
             [b"farmer", bytes(pool_pda), bytes(farmer_pk)], program_id
         )
 
-        # Сериализация аргументов (borsh-like: little-endian)
-        discriminator = _anchor_discriminator("release_funds_by_oracle")
-        amount_bytes = struct.pack("<Q", amount_lamports)  # u64 LE
-        score_bytes = struct.pack("<B", ai_score)  # u8
-
-        data = discriminator + amount_bytes + score_bytes
-
-        # Аккаунты для инструкции
-        accounts = [
-            AccountMeta(pubkey=oracle_kp.pubkey(), is_signer=True, is_writable=True),
-            AccountMeta(pubkey=farmer_pk, is_signer=False, is_writable=True),
-            AccountMeta(pubkey=farmer_pda, is_signer=False, is_writable=True),
-            AccountMeta(pubkey=pool_pda, is_signer=False, is_writable=True),
-            AccountMeta(pubkey=SYS_PROGRAM_ID, is_signer=False, is_writable=False),
-        ]
-
-        instruction = Instruction(
-            program_id=program_id, accounts=accounts, data=bytes(data)
-        )
-
-        # Получаем свежий blockhash
         async with httpx.AsyncClient(timeout=15) as client:
+            # Pre-flight: проверяем, зарегистрирован ли фермер на контракте.
+            # На демо новые сид-фермеры живут только в in-memory базе бэкенда,
+            # поэтому их PDA на Devnet пустые в первую эвалуацию.
+            farmer_exists = await _account_exists(client, str(farmer_pda))
+            if not farmer_exists:
+                print("[bridge] Farmer PDA not found, registering on-chain...")
+                await _send_register_farmer(
+                    client, oracle_kp, farmer_pk, farmer_pda,
+                    pool_pda, program_id, region_code="demo",
+                )
+
+            # Сериализация аргументов (borsh-like: little-endian)
+            discriminator = _anchor_discriminator("release_funds_by_oracle")
+            amount_bytes = struct.pack("<Q", amount_lamports)  # u64 LE
+            score_bytes = struct.pack("<B", ai_score)  # u8
+
+            data = discriminator + amount_bytes + score_bytes
+
+            # Аккаунты для инструкции
+            accounts = [
+                AccountMeta(pubkey=oracle_kp.pubkey(), is_signer=True, is_writable=True),
+                AccountMeta(pubkey=farmer_pk, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=farmer_pda, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=pool_pda, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=SYS_PROGRAM_ID, is_signer=False, is_writable=False),
+            ]
+
+            instruction = Instruction(
+                program_id=program_id, accounts=accounts, data=bytes(data)
+            )
+
+            # Получаем свежий blockhash
             rpc_resp = await client.post(
                 SOLANA_RPC_URL,
                 json={
@@ -142,8 +268,10 @@ async def _send_live_transaction(
             tx = Transaction([oracle_kp], msg, recent_blockhash)
 
             # Отправляем транзакцию
+            import base64
+
             tx_bytes = bytes(tx)
-            tx_b64 = __import__("base64").b64encode(tx_bytes).decode()
+            tx_b64 = base64.b64encode(tx_bytes).decode()
 
             send_resp = await client.post(
                 SOLANA_RPC_URL,
