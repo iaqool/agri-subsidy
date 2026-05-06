@@ -1,6 +1,11 @@
+---
+name: local-dev
+description: Run, develop, and test the Dala Network agri-subsidy app — locally and against the Vercel + Railway production deployment. Covers the demo seed flow, how to detect silent MOCK / Fallback modes, and how to verify a Devnet transaction.
+---
+
 # Local Development & Testing
 
-## Start Services
+## Start Services Locally
 
 ```bash
 # Backend (FastAPI)
@@ -10,7 +15,7 @@ cd agent && python -m uvicorn main:app --host 0.0.0.0 --port 8080
 cd dashboard && npm install && npx vite --host 0.0.0.0 --port 5173
 ```
 
-## Fallback Mode
+## Fallback Mode (local dev)
 
 The backend runs without `OPENAI_API_KEY` and `OPENWEATHER_API_KEY`. It uses:
 - `fallback_agent.py` for AI reasoning (pre-scripted scenarios)
@@ -21,25 +26,75 @@ The backend runs without `OPENAI_API_KEY` and `OPENWEATHER_API_KEY`. It uses:
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `CORS_ORIGINS` | Allowed frontend origins | `http://localhost:5173,http://127.0.0.1:5173` |
+| `CORS_ORIGINS` | Allowed frontend origins (note: plural; singular `CORS_ORIGIN` is a no-op) | `http://localhost:5173,http://127.0.0.1:5173` plus the Vercel prod + preview regex |
+| `CORS_ORIGIN_REGEX` | Regex for additional dynamic origins (preview deployments) | matches `agri-subsidy-git-*.vercel.app` |
 | `ENABLE_DOCS` | Show FastAPI /docs | disabled |
 | `DISABLE_DEMO` | Block /api/demo/seed | disabled |
 | `MAX_FARMERS` | Registration cap | 10000 |
 | `MAX_EVALUATIONS` | Evaluation DB cap | 50000 |
 | `MAX_CONCURRENT_SSE` | SSE connection limit | 200 |
+| `OPENAI_API_KEY` | If unset / invalid → AI agent enters Fallback mode silently | unset |
+| `ORACLE_KEYPAIR_JSON` | Solana payer keypair (JSON array). If unset / unparseable → bridge enters MOCK mode silently | unset |
+| `SOLANA_RPC_URL` | Devnet/mainnet RPC | `https://api.devnet.solana.com` |
+| `PROGRAM_ID` | Anchor program on Devnet | `971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF` (live, single-oracle build) |
 
-## Demo Flow (Testing)
+## Demo Flow (UI)
 
-1. Open http://localhost:5173
-2. Click "Открыть дашборд" (Launch App) on landing page
-3. Click "Load Demo" button → seeds 5 Kazakhstan demo farmers
+1. Open http://localhost:5173 (local) or `https://agri-subsidy.vercel.app/` (prod)
+2. Click "Открыть дашборд" / "Launch App" on landing page
+3. Click "Load Demo" button → seeds **7** demo farmers (5 KZ + 2 drought-scenario in arid biomes)
 4. Click a farmer card → click "Evaluate" → SSE stream shows AI reasoning
-5. Verdict card appears with composite score, threshold 55/100
+5. Verdict card appears with composite score, threshold 55/100, plus a Devnet TX link if approved
+
+### Demo seed farmers and expected outcome
+
+| Wallet | Coords | Region | Behavior |
+|---|---|---|---|
+| `4pMnsypm…UdX5z` | 53.2°N 63.6°E | Kostanay (KZ) | weather-dependent |
+| `EeqwDr7k…4MaQ` | 54.9°N 69.1°E | North Kazakhstan (KZ) | weather-dependent |
+| `CHaGvsfM…7hu` | 51.1°N 71.4°E | Akmola (KZ) | weather-dependent |
+| `FZA62o7r…1hFyC` | 50.3°N 57.2°E | Aktobe (KZ) | typically rejects in cool/wet months, may approve in summer |
+| `8jm7bVG8…MUM` | 43.8°N 77.1°E | Almaty (KZ) | weather-dependent |
+| `6zMppjRu…rY8LD8` | 45.5°N 59.0°E | Aralkum / former Aral Sea | **always approves** (severe_drought year-round via arid-zone NDVI offset) |
+| `7V9GTiEG…Ct76W` | 39.5°N 60.0°E | Karakum desert (TM) | **always approves** (severe_drought year-round) |
+
+The last two are tagged in the dashboard with a 🏜️ flag and a yellow `DEMO` chip. Use them for any pitch demo where a guaranteed-approve walkthrough is required.
+
+## Testing on Prod
+
+- Frontend: `https://agri-subsidy.vercel.app/`
+- Backend:  `https://agri-subsidy-production.up.railway.app/`
+- `POST /api/demo/seed` is idempotent — safe to re-seed during a session
+- `GET /api/farmers` should return 7 entries; the two drought-scenario ones include a non-null `label` field — pre-PR-#7 backends will only return 5
+
+### Detecting silent MOCK / Fallback modes
+
+Both modes look like success in the UI. Always verify before claiming a real Devnet payout:
+
+- **Solana MOCK mode.** Triggered when `ORACLE_KEYPAIR_JSON` is missing or unparseable. The success log line in the AI Reasoning Log will read `✅ TX Confirmed — [MOCK] TX: <signature>...` instead of `[LIVE] TX:`. The signature is well-formed but is **not** on chain. Verify with:
+
+  ```bash
+  curl -sS -X POST https://api.devnet.solana.com \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"getSignatureStatuses","params":[["<signature>"]]}'
+  # value:[null]   →  not on chain (MOCK)
+  # value:[{ok}]   →  real Devnet TX
+  ```
+
+- **AI Fallback mode.** Triggered when OpenAI is unreachable / quota / 401. Visible as a small `⚡ Fallback mode` chip on the verdict panel. Critically, the verdict-panel "AI Reasoning" paragraph in this mode comes from a hard-coded scenario template and may cite **completely different numbers** (temperature, humidity, NDVI) than the SSE log for the same evaluation — do not trust it as evidence. The SSE log (left side) contains the canonical pipeline truth.
+
+If either mode is detected on prod, the fix is on Railway env (key validity, JSON shape, network), not in the repo code.
 
 ## Architecture Notes
 
-- **Dual-Validation**: Off-chain AI oracle recommends, on-chain Anchor contract enforces
-- **Scoring**: `composite = weather_score × 0.4 + ndvi_score × 0.4 + history_score × 0.2`; approve if ≥ 55
-- **In-memory state**: `farmers_db` and `evaluations_db` are volatile (restart clears data)
-- **Smart contract**: Anchor program at `contracts/`, program ID in `Anchor.toml`
-- **Frontend API base**: Configured via `VITE_API_BASE_URL`, defaults to `http://127.0.0.1:8080`
+- **Dual-Validation**: Off-chain AI oracle recommends, on-chain Anchor contract enforces (single-oracle authority on Devnet today; M-of-N quorum is in source and reserved for redeploy at `971Z…XpB`).
+- **Scoring**: `composite = weather_score × 0.4 + ndvi_score × 0.4 + history_score × 0.2`; approve if ≥ 55. With `severe_drought` NDVI status, `ndvi_score=95` → composite floor ≈ 58 regardless of weather, which is why the two arid-zone demo farmers are deterministic-approve.
+- **In-memory state**: `farmers_db` and `evaluations_db` are volatile (restart / Railway redeploy clears data — re-run `POST /api/demo/seed`).
+- **Smart contract**: Anchor program at `contracts/`, live `PROGRAM_ID` differs from `declare_id!()` until the M-of-N redeploy.
+- **Frontend API base**: Configured via `VITE_API_BASE_URL`, defaults to `http://127.0.0.1:8080`.
+
+## Devin Secrets Needed
+
+- `RAILWAY_API_TOKEN` — temporary token (user creates at https://railway.com/account/tokens) to read/edit Railway env vars and logs during prod debugging. Not needed for plain UI testing.
+- `OPENAI_API_KEY` — only needed for local end-to-end with live AI; unset = fallback mode.
+- `OPENWEATHER_API_KEY` — same.
