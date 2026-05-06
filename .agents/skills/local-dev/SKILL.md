@@ -1,6 +1,6 @@
 ---
 name: local-dev
-description: Run, develop, and test the Dala Network agri-subsidy app — locally and against the Vercel + Railway production deployment. Covers the demo seed flow, how to detect silent MOCK / Fallback modes, and how to verify a Devnet transaction.
+description: Run, develop, and test the Dala Network agri-subsidy app — locally and against the Vercel + Railway production deployment. Covers the demo seed flow, how to detect silent MOCK / Fallback modes, how to verify a Devnet transaction, and how to bootstrap a fresh Devnet pool.
 ---
 
 # Local Development & Testing
@@ -37,6 +37,7 @@ The backend runs without `OPENAI_API_KEY` and `OPENWEATHER_API_KEY`. It uses:
 | `ORACLE_KEYPAIR_JSON` | Solana payer keypair (JSON array). If unset / unparseable → bridge enters MOCK mode silently | unset |
 | `SOLANA_RPC_URL` | Devnet/mainnet RPC | `https://api.devnet.solana.com` |
 | `PROGRAM_ID` | Anchor program on Devnet | `971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF` (live, single-oracle build) |
+| `ADMIN_PUBKEY` | Authority used to derive pool PDA: `[b"subsidy_pool", ADMIN_PUBKEY]`. The bridge re-reads this on every request. For the hackathon-demo deploy this is set to the **oracle** pubkey so we can sign `initialize_subsidy_pool` ourselves; in a production pool this would be a separate admin/multisig. | unset |
 
 ## Demo Flow (UI)
 
@@ -64,14 +65,14 @@ The last two are tagged in the dashboard with a 🏜️ flag and a yellow `DEMO`
 
 - Frontend: `https://agri-subsidy.vercel.app/`
 - Backend:  `https://agri-subsidy-production.up.railway.app/`
-- `POST /api/demo/seed` is idempotent — safe to re-seed during a session
-- `GET /api/farmers` should return 7 entries; the two drought-scenario ones include a non-null `label` field — pre-PR-#7 backends will only return 5
+- `POST /api/demo/seed` is idempotent and **must be re-run after every Railway redeploy** — `farmers_db` is in-memory and resets on container restart.
+- `GET /api/farmers` should return 7 entries; the two drought-scenario ones include a non-null `label` field — pre-PR-#7 backends will only return 5.
 
 ### Detecting silent MOCK / Fallback modes
 
 Both modes look like success in the UI. Always verify before claiming a real Devnet payout:
 
-- **Solana MOCK mode.** Triggered when `ORACLE_KEYPAIR_JSON` is missing or unparseable. The success log line in the AI Reasoning Log will read `✅ TX Confirmed — [MOCK] TX: <signature>...` instead of `[LIVE] TX:`. The signature is well-formed but is **not** on chain. Verify with:
+- **Solana MOCK mode.** Triggered when `ORACLE_KEYPAIR_JSON` is missing/unparseable, when the pool PDA does not exist on-chain, or when any other on-chain step fails inside the bridge's broad `except`. The success log line in the AI Reasoning Log will read `✅ TX Confirmed — [MOCK] TX: <signature>...` instead of `[LIVE] TX:`. The signature is well-formed but is **not** on chain. Verify with:
 
   ```bash
   curl -sS -X POST https://api.devnet.solana.com \
@@ -81,9 +82,24 @@ Both modes look like success in the UI. Always verify before claiming a real Dev
   # value:[{ok}]   →  real Devnet TX
   ```
 
-- **AI Fallback mode.** Triggered when OpenAI is unreachable / quota / 401. Visible as a small `⚡ Fallback mode` chip on the verdict panel. Critically, the verdict-panel "AI Reasoning" paragraph in this mode comes from a hard-coded scenario template and may cite **completely different numbers** (temperature, humidity, NDVI) than the SSE log for the same evaluation — do not trust it as evidence. The SSE log (left side) contains the canonical pipeline truth.
+  For PR #9+ the most common cause is a **missing pool PDA** on Devnet — see the bootstrap section below. Railway logs will show `AnchorError caused by account: farmer_account. Error Code: AccountNotInitialized. Error Number: 3012` followed by `[bridge] MOCK TX generated:`.
 
-If either mode is detected on prod, the fix is on Railway env (key validity, JSON shape, network), not in the repo code.
+- **AI Fallback mode.** Triggered when OpenAI is unreachable / quota / 401, or when GPT-4o never produces the final `VERDICT:` line. Visible as a small `⚡ Fallback mode` chip on the verdict panel. Critically, the verdict-panel "AI Reasoning" paragraph in this mode comes from a hard-coded scenario template and may cite **completely different numbers** (temperature, humidity, NDVI) than the SSE log for the same evaluation — do not trust it as evidence. The SSE log (left side) contains the canonical pipeline truth.
+
+If either mode is detected on prod, the fix is on Railway env (key validity, JSON shape, network) or a missing on-chain pool, not in the repo code.
+
+## Bootstrap a fresh Devnet pool
+
+If the prod backend is going to MOCK on every eval and Railway logs show `AnchorError ... AccountNotInitialized` for the **pool** account (or `getAccountInfo` on the derived pool PDA returns `null`), the pool was never initialized on-chain. `solana program deploy` and `initialize_subsidy_pool` are separate steps and the second is easy to forget.
+
+Minimum-friction recovery (no admin private key needed):
+
+1. Set `ADMIN_PUBKEY` on Railway to the **oracle** pubkey (`Pubkey.from_bytes(ORACLE_KEYPAIR_JSON).pubkey()`). The bridge re-derives pool PDA from `ADMIN_PUBKEY` on every request, so this just changes the seed.
+2. Sign `initialize_subsidy_pool(pool_bump)` with the oracle keypair, passing oracle as both authority and oracle account. Anchor seed: `[b"subsidy_pool", oracle_pubkey]`. Discriminator: `sha256("global:initialize_subsidy_pool")[:8]`. Args: `pool_bump: u8`.
+3. Fund the pool with SOL (each `release_funds_by_oracle` payout is `SUBSIDY_AMOUNT_SOL` = 1.5 SOL by default — fund with 3-5 SOL for a typical demo).
+4. Trigger Railway redeploy (env change does this) and re-run `POST /api/demo/seed`.
+
+After step 2 the pool PDA exists; PR #9's `register_farmer` auto-init will then work for any farmer evaluated for the first time. Pool funding is a hard prerequisite — without it, payouts will fail with insufficient lamports even when the pool account exists.
 
 ## Architecture Notes
 
