@@ -6,7 +6,6 @@ r"""
   C:\Users\USER\AppData\Local\Programs\Python\Python311\python.exe generate_keypair.py
 """
 import json
-import os
 from pathlib import Path
 
 from solders.keypair import Keypair
@@ -20,7 +19,7 @@ def main():
     print("🔑 Oracle Keypair Generated")
     print("=" * 55)
     print(f"  Public Key : {pubkey_str}")
-    print(f"  Keypair saved to: oracle_keypair.json")
+    print("  Keypair saved to: oracle_keypair.json")
     print("=" * 55)
 
     # Сохраняем в oracle_keypair.json (формат совместим с solana-keygen)

@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (FastAPI)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: agent/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx ruff
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Run tests
+        run: pytest -q
+
+  frontend:
+    name: Frontend (Vite + React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Build
+        run: npm run build
+
+  contracts:
+    name: Contracts (Anchor / Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    # rust-toolchain.toml in contracts/ pins 1.75.0 for Anchor BPF builds, but
+    # newer transitive deps (toml_datetime) require edition2024 which 1.75
+    # doesn't support. We override the toolchain just for `cargo check` here —
+    # this CI step verifies the lib compiles, not BPF targets.
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+      - name: cargo check
+        run: cargo +stable check --package agri_subsidy
+      - name: cargo clippy (informational)
+        run: cargo +stable clippy --package agri_subsidy || true

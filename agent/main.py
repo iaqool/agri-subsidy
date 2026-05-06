@@ -1,19 +1,20 @@
 import asyncio
+import hashlib
 import os
 import re
 import uuid
 import json
 import logging
 from collections import OrderedDict
-from typing import Dict
-from datetime import datetime
+from typing import Dict, Optional, Tuple
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
-from models import FarmerRegistration, EvaluationResult, AILogEntry, FarmerStatus
+from models import FarmerRegistration, AILogEntry, FarmerStatus
 from weather_service import fetch_weather_data
 from ndvi_service import fetch_historical_ndvi
 from scoring_engine import calculate_composite_score
@@ -61,7 +62,7 @@ app.add_middleware(
     allow_origins=[o.strip() for o in _allowed_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
 )
 
 
@@ -99,6 +100,48 @@ class _LRUEvalDB(OrderedDict):
 evaluations_db: _LRUEvalDB = _LRUEvalDB()  # evaluation_id -> {logs, result, ...}
 total_disbursed_sol: float = 0.0  # Накопительная сумма выплат
 _eval_lock = asyncio.Lock()
+
+# Idempotency: dedupe identical evaluation requests within a short window.
+# Maps fingerprint -> (evaluation_id, expires_at). Cleaned lazily on lookup.
+IDEMPOTENCY_WINDOW_SECONDS = int(os.getenv("IDEMPOTENCY_WINDOW_SECONDS", "60"))
+_idempotency_cache: Dict[str, Tuple[str, datetime]] = {}
+
+
+def _evaluation_fingerprint(
+    wallet: str, lat: float, lon: float, idempotency_key: Optional[str] = None
+) -> str:
+    """Stable hash of the evaluation request for dedupe purposes.
+
+    If the client supplies an explicit Idempotency-Key, we honour it as-is.
+    Otherwise we hash (wallet, rounded coords) so reload-spamming the same
+    farmer card does not start parallel pipelines.
+    """
+    if idempotency_key:
+        return f"key:{idempotency_key.strip()}"
+    payload = f"{wallet}|{round(lat, 4)}|{round(lon, 4)}".encode()
+    return "req:" + hashlib.sha256(payload).hexdigest()[:16]
+
+
+def _idempotency_lookup(fingerprint: str) -> Optional[str]:
+    """Return a cached evaluation_id for this fingerprint, or None."""
+    now = datetime.utcnow()
+    expired = [k for k, (_, exp) in _idempotency_cache.items() if exp <= now]
+    for k in expired:
+        _idempotency_cache.pop(k, None)
+    entry = _idempotency_cache.get(fingerprint)
+    if entry is None:
+        return None
+    eval_id, _ = entry
+    if eval_id not in evaluations_db:
+        _idempotency_cache.pop(fingerprint, None)
+        return None
+    return eval_id
+
+
+def _idempotency_record(fingerprint: str, evaluation_id: str) -> None:
+    """Cache an evaluation_id for the configured window."""
+    expires = datetime.utcnow() + timedelta(seconds=IDEMPOTENCY_WINDOW_SECONDS)
+    _idempotency_cache[fingerprint] = (evaluation_id, expires)
 
 
 # ─── Pydantic Schemas ────────────────────────────────────────────────────────────
@@ -218,11 +261,26 @@ async def register_farmer(data: FarmerRegistration):
 
 
 @app.post("/api/evaluate", response_model=EvaluateResponse, summary="Запустить оценку")
-async def start_evaluation(req: EvaluateRequest):
+async def start_evaluation(req: EvaluateRequest, request: Request):
+    """Kick off an asynchronous evaluation pipeline for a farmer.
+
+    Returns an `evaluation_id` that the client uses to subscribe to the SSE
+    stream. Requests are deduplicated within `IDEMPOTENCY_WINDOW_SECONDS`
+    against either an explicit `Idempotency-Key` header or the
+    `(wallet, rounded coords)` tuple, so quick double-clicks don't spawn
+    parallel pipelines.
     """
-    Запускает асинхронный цикл оценки фермера.
-    Возвращает evaluation_id для подключения к SSE-стриму.
-    """
+    idempotency_key = request.headers.get("Idempotency-Key")
+    fingerprint = _evaluation_fingerprint(
+        req.wallet_address, req.lat, req.lon, idempotency_key
+    )
+    cached = _idempotency_lookup(fingerprint)
+    if cached is not None:
+        return EvaluateResponse(
+            evaluation_id=cached,
+            message="Идемпотентность: возвращаю ранее запущенный evaluation_id.",
+        )
+
     if not evaluations_db.try_make_room():
         raise HTTPException(status_code=429, detail="Evaluation capacity reached, try later")
 
@@ -247,6 +305,8 @@ async def start_evaluation(req: EvaluateRequest):
         "result": None,
         "started_at": datetime.utcnow().isoformat(),
     }
+
+    _idempotency_record(fingerprint, evaluation_id)
 
     asyncio.create_task(
         run_evaluation_pipeline(evaluation_id, req.wallet_address, req.lat, req.lon)
@@ -413,7 +473,7 @@ async def run_evaluation_pipeline(
         # Шаг 2: NDVI
         log("🛰️ Запрос NDVI", "Получаю спутниковые данные NDVI...")
         ndvi = await fetch_historical_ndvi(lat, lon)
-        
+
         log(
             "🌿 NDVI получен",
             f"Текущий NDVI: {ndvi['current_ndvi']}, историческая норма: {ndvi['historical_avg']}, "
@@ -486,7 +546,6 @@ async def run_evaluation_pipeline(
         eval_data["completed_at"] = datetime.utcnow().isoformat()
 
     except Exception as e:
-        import traceback as tb
 
         logger.error("Evaluation %s failed: %s", evaluation_id, e, exc_info=True)
         eval_data["status"] = "error"

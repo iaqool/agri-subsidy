@@ -11,7 +11,7 @@ async function requestJson(path, options) {
 
   try {
     response = await fetch(`${API_BASE}${path}`, options);
-  } catch (error) {
+  } catch {
     throw new Error(
       `Dala API is offline. Check VITE_API_BASE_URL or start backend on ${API_BASE}.`,
     );
@@ -49,11 +49,16 @@ export function useSSE(evaluationId) {
   useEffect(() => {
     if (!evaluationId) return;
 
-    // Reset state
+    // Reset state when subscribing to a fresh evaluation. The lint rule
+    // (react-hooks/set-state-in-effect) flags synchronous setState in effects;
+    // the canonical alternative would be a `key` prop at the call-site, but we
+    // own this hook in isolation and resetting here keeps the API ergonomic.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setLogs([]);
     setDone(false);
     setResult(null);
     setError(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     const es = new EventSource(`${API_BASE}/api/stream/${evaluationId}`);
     esRef.current = es;
@@ -71,7 +76,10 @@ export function useSSE(evaluationId) {
       try {
         const res = JSON.parse(e.data);
         setResult(res);
-      } catch {}
+      } catch {
+        // Final 'done' event without a parsable payload — fall through to set
+        // `done=true` below so consumers stop spinning.
+      }
       setDone(true);
       es.close();
     });
