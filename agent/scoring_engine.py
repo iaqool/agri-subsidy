@@ -78,13 +78,13 @@ def calculate_composite_score(
 ) -> Dict[str, Any]:
     """
     Итоговый скор = weather * 0.4 + ndvi * 0.4 + history * 0.2
-    
+
     history_penalty: штраф за прошлые злоупотребления субсидиями (0–100).
     В MVP всегда 0 (нет истории).
     """
     weather_score = calculate_weather_score(weather)
     ndvi_score = calculate_ndvi_score(ndvi)
-    
+
     # История (обратная — 100 означает ХОРОШУЮ историю, т.е. нет штрафа)
     history_score = 100 - history_penalty
 

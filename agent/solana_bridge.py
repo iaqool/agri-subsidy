@@ -40,7 +40,6 @@ def _mock_signature() -> str:
 
         return str(Signature.from_bytes(os.urandom(64)))
     except ImportError:
-        import base64
 
         return "".join(random.choices(_B58_CHARS, k=87))
 

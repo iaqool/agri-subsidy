@@ -1,0 +1,26 @@
+[project]
+name = "agri-subsidy-agent"
+version = "0.1.0"
+description = "Dala Network drought oracle backend"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv", "venv", "__pycache__"]
+
+[tool.ruff.lint]
+# Conservative ruleset: focus on real bugs and unused code, skip aggressive
+# style rewrites (UP/B) that would churn existing files. Tighten over time.
+select = ["E", "F", "W"]
+ignore = [
+  "E501",  # line length already enforced via line-length above
+  "E402",  # module-level imports after top-of-file (tests set env first)
+  "E741",  # ambiguous var names — used in legacy code
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]

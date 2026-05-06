@@ -1,6 +1,6 @@
 import re
 from pydantic import BaseModel, field_validator
-from typing import Optional, Dict
+from typing import Optional
 
 _B58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
