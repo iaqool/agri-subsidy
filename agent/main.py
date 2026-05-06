@@ -201,32 +201,55 @@ class StatsResponse(BaseModel):
 
 
 # ─── Demo Seed Data ──────────────────────────────────────────────────────────────
+# The first five farmers cover Kazakh agricultural regions and produce a
+# realistic mix of approved/rejected outcomes depending on the evaluation
+# month and live weather. The last two are picked from the simulator's
+# arid-biome bounding boxes — they trigger severe_drought year-round so
+# pitch demos always have a guaranteed-approve path to walk through.
 DEMO_FARMERS = [
     {
         "wallet": "4pMnsypmRtd94bK94LXjFPWghpXN5WfCcLvnJhoUdX5z",
         "lat": 53.2,
         "lon": 63.6,
-    },  # Kostanay Region
+        "label": "Kostanay Region (KZ)",
+    },
     {
         "wallet": "EeqwDr7kNxp4y9vj4MaQijv4BmgAm3WXArzZM5WikD6U",
         "lat": 54.9,
         "lon": 69.1,
-    },  # North Kazakhstan Region
+        "label": "North Kazakhstan Region (KZ)",
+    },
     {
         "wallet": "CHaGvsfMx5YKE3mYq7huQM6keRN2UUsfhwAZMypWw7KC",
         "lat": 51.1,
         "lon": 71.4,
-    },  # Akmola Region
+        "label": "Akmola Region (KZ)",
+    },
     {
         "wallet": "FZA62o7rNFBmx5g1hFyCmpRYWhpxAHTiqnYUaRd7EGfL",
         "lat": 50.3,
         "lon": 57.2,
-    },  # Aktobe Region
+        "label": "Aktobe Region (KZ)",
+    },
     {
         "wallet": "8jm7bVG8CiqxDmohHUuMk5R3WZkucTrXPUDsDhzvLQ3p",
         "lat": 43.8,
         "lon": 77.1,
-    },  # Almaty Region
+        "label": "Almaty Region (KZ)",
+    },
+    # ── Drought-scenario seed farmers (always severe_drought + approved) ──
+    {
+        "wallet": "6zMppjRuXGdUqe9LU51wvCo8ZgbKEAbJv4ke85rY8LD8",
+        "lat": 45.5,
+        "lon": 59.0,
+        "label": "Aralkum / former Aral Sea (KZ side) — drought scenario",
+    },
+    {
+        "wallet": "7V9GTiEGej451eo11fpYPR4xe5BDE6QDBNGjyRwCt76W",
+        "lat": 39.5,
+        "lon": 60.0,
+        "label": "Karakum desert (TM) — drought scenario",
+    },
 ]
 
 
@@ -235,7 +258,7 @@ DEMO_FARMERS = [
 
 @app.post("/api/demo/seed", summary="Засеять демо-данными")
 async def seed_demo_data():
-    """Инициализирует 5 демо-фермеров для демонстрации."""
+    """Инициализирует демо-фермеров для презентаций (включает гарантированно severe_drought сценарии)."""
     if os.getenv("DISABLE_DEMO", "").lower() in ("1", "true"):
         raise HTTPException(status_code=403, detail="Demo endpoints disabled in production")
     for f in DEMO_FARMERS:
@@ -244,6 +267,7 @@ async def seed_demo_data():
             lat=f["lat"],
             lon=f["lon"],
             status="pending",
+            label=f.get("label"),
         )
     return {
         "message": f"Загружено {len(DEMO_FARMERS)} демо-фермеров",
