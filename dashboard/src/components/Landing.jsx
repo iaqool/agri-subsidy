@@ -9,8 +9,8 @@ const logos = [
   'OpenAI',
   'Sentinel NDVI',
   'Copernicus',
-  'Pyth',
-  'Switchboard',
+  'NASA MODIS',
+  'OpenWeatherMap',
   'Helius',
 ];
 
@@ -19,69 +19,100 @@ const localizedCopy = {
     readDocs: 'Документация',
     launchApp: 'Открыть дашборд',
     heroLive: 'LIVE ON DEVNET',
-    heroBadge: 'Усиливаем степь ончейн-интеллектом →',
-    heroTitleTop: 'Находим сигнал сквозь засуху —',
-    heroTitleBottom: 'до того, как потерян урожай.',
+    heroBadge: 'Drought-specific oracle layer для Solana →',
+    heroTitleTop: 'Спутник видит засуху —',
+    heroTitleBottom: 'смарт-контракт платит фермеру.',
     heroSub:
-      'Публичная инфраструктура выплат для агросектора. Архитектура Dual-Validation убирает слепое доверие: OpenAI анализирует спутниковые данные, а Anchor-контракт контролирует выдачу средств.',
-    heroStats: ['ФИНАЛИЗАЦИЯ TX', 'РАЗРЕШЕНИЕ NDVI', 'ОНЧЕЙН-КОНТРОЛЬ', 'ЧЕЛОВЕЧЕСКИЙ ФАКТОР'],
+      'Drought-specific oracle для параметрических страховых протоколов и государственных программ помощи фермерам. NDVI и климат превращаются в верифицируемые ончейн-триггеры выплат на Solana.',
+    heroStats: ['FINALIZED TX', 'NDVI РАЗРЕШЕНИЕ', 'ОНЧЕЙН-КОНТРОЛЬ', 'ОРАКУЛ-КВОРУМ'],
     infraLabel: 'Инфраструктурный стек',
     capabilitiesKicker: 'Возможности',
-    capabilitiesTitle: 'Безопасная связка AI + спутники + смарт-контракты',
+    capabilitiesTitle: 'AI + спутники + Anchor-контракт',
     capabilitiesDescription:
-      'Ключевые модули адаптированы под Dala Network для хакатон-демо и безопасного продакшн-пути.',
+      'Композитный drought-score объясним, oracle-уровень — отдельный от приложения. Парам-страх протоколы могут подписаться на feed как на Pyth, только для drought-событий.',
     featureCards: [
       {
-        title: 'Спутниковый NDVI ingest',
-        body: 'Нормализуем NDVI Sentinel и климатический контекст по регионам выплат в реальном времени.',
-        status: '847K тайлов/день',
+        title: 'NDVI + климат',
+        body: 'Sentinel и MODIS дают вегетационный индекс, OpenWeatherMap — климат. Композитный score с весами 0.4 / 0.4 / 0.2.',
+        status: 'Sentinel + MODIS',
       },
       {
-        title: 'Скоринг засухи через OpenAI',
-        body: 'AI считает объяснимый композитный скор и приоритизирует решения по климатической поддержке.',
-        status: '97.3% доверия',
+        title: 'Объяснимый AI-score',
+        body: 'OpenAI стримит логику оценки в SSE, fallback-агент работает без AI. Каждый score — с разбором по компонентам.',
+        status: 'GPT-4o · fallback ready',
       },
       {
         title: 'Dual-Validation в Anchor',
-        body: 'AI рекомендует офчейн, но финальная безопасность выплат жестко проверяется ончейн-порогами.',
-        status: '0 небезопасных tx',
+        body: 'AI рекомендует офчейн. Anchor проверяет порог ≥ 55, лимит ≤ 5 SOL, авторизованного оракула. Кворум M-of-N — в roadmap.',
+        status: 'Devnet live',
       },
     ],
     integrationsTitle: 'Компонентные интеграции',
     integrationsDescription:
-      'Все, что нужно для детерминированной инфраструктуры публичных выплат.',
+      'Слой данных, скоринга и enforcement — каждый модуль заменяем. NDVI-провайдеры, AI-движки и oracle-кворум подключаются по интерфейсу.',
     howItWorksKicker: 'Как это работает',
     howItWorksTitle: 'От NDVI-сигнала до ончейн-выплаты',
     steps: [
       {
         title: '1. Сбор данных',
-        body: 'Спутниковые и климатические фиды нормализуются по регионам.',
+        body: 'Sentinel и MODIS NDVI плюс OpenWeatherMap нормализуются по координатам региона.',
       },
       {
-        title: '2. Скоринг в OpenAI',
-        body: 'AI формирует объяснимый индекс тяжести засухи.',
+        title: '2. AI-скоринг',
+        body: 'OpenAI с fallback-агентом формирует объяснимый drought-score 0–100.',
       },
       {
-        title: '3. Валидация через Anchor',
-        body: 'Контрактные guardrails проверяют строгие пороги выплат.',
+        title: '3. Anchor enforcement',
+        body: 'Контракт проверяет порог, лимиты и авторизованного оракула. Final commitment.',
       },
       {
-        title: '4. Безопасная выдача',
-        body: 'Одобренные выплаты исполняются в Solana с полным аудит-трейлом.',
+        title: '4. Выплата за минуты',
+        body: 'SOL уходит на кошелёк фермера с полным ончейн аудит-трейлом.',
       },
     ],
     liveOracleTitle: 'Пульс оракула',
     liveOracleDescription: 'Таймлайн Dual-Validation и тренд пропускной способности.',
     minEvalLabel: 'мин оценка',
     policyPassLabel: 'прохождение policy %',
-    problemVisionKicker: 'Проблема и видение',
-    problemVisionTitle: 'Пересобираем климатические выплаты для реального эффекта',
+    problemVisionKicker: 'Проблема и решение',
+    problemVisionTitle: 'Чиним рельсы выплат для climate-shocks',
     problemKicker: 'Проблема',
     problemText:
-      'Климатические шоки участились, но господдержка остается ручной, фрагментированной и уязвимой к коррупции. Фермеры ждут месяцами.',
+      'Засуха в 2024 году принесла $40B+ убытков агросектору. 70% мелких фермеров мира не имеют доступа к страховке. Ручные клеймы — 30–90 дней. Гос-субсидии теряют 15–40% на коррупции.',
     solutionKicker: 'Решение',
     solutionText:
-      'Параметрическая RWA-инфраструктура: используем спутниковый NDVI и AI, чтобы быстро подтверждать ущерб и автоматически запускать выплаты через смарт-контракты Solana.',
+      'Drought oracle layer на Solana. Парам-страх протоколы (AMOCA-like), перестраховщики и гос-программы подключаются к одному feed и одной Anchor-rail. Тригерр верифицируем, выплата за минуты, аудит-трейл навсегда.',
+    customerKicker: 'Кому это нужно',
+    customerTitle: 'Три ICP, один oracle',
+    customerCards: [
+      {
+        title: 'Парам-страх протоколы',
+        body: 'AMOCA, SeedFlow, NOVA и аналоги — стрим drought-триггеров в их смарт-контракты. $0.50 за вызов, инфра не на них.',
+        status: 'основной фокус',
+      },
+      {
+        title: 'Перестраховщики',
+        body: 'Munich Re, Swiss Re sandbox-программы — white-label oracle для портфелей в развивающихся рынках. Каждая выплата трассируема.',
+        status: 'B2B traditional',
+      },
+      {
+        title: 'Гос-программы помощи',
+        body: 'Минсельхозы и доноры — замена ручной выдачи на автоматические аудитуемые рельсы. Пилоты в Центральной Азии.',
+        status: 'Q3 2026 пилот',
+      },
+    ],
+    roadmapKicker: 'Roadmap',
+    roadmapTitle: 'Что сделано и что дальше',
+    roadmapItems: [
+      { tag: 'Q4 2025', text: 'Anchor-программа на Devnet, dual-validation архитектура', done: true },
+      { tag: 'Q4 2025', text: 'AI-оракул MVP с fallback-агентом и SSE стримингом', done: true },
+      { tag: 'Q1 2026', text: 'Сабмит на Colosseum Frontier — DePIN, Climate, Public Goods', done: true },
+      { tag: 'Q2 2026', text: 'Multi-oracle кворум M-of-N, параметризуемые policy terms', done: false },
+      { tag: 'Q2 2026', text: 'Первая интеграция с парам-страх протоколом', done: false },
+      { tag: 'Q3 2026', text: 'Реальный Sentinel/MODIS NDVI, mainnet beta', done: false },
+      { tag: 'Q3 2026', text: 'Public-benefit пилот с минсельхозом одной страны', done: false },
+      { tag: 'Q4 2026', text: 'Production launch, $1M+ TVL в страховых пулах', done: false },
+    ],
     ctaTitle: 'Быстрая помощь, усиленная политикой.',
     ctaDescription:
       'Откройте дашборд, чтобы запустить AI-оценку и проверить ончейн-предохранители.',
@@ -90,70 +121,103 @@ const localizedCopy = {
     readDocs: 'Read Docs',
     launchApp: 'Launch App',
     heroLive: 'LIVE ON DEVNET',
-    heroBadge: 'Empowering the Steppe with On-Chain Intelligence →',
-    heroTitleTop: 'Find the signal through the drought —',
-    heroTitleBottom: 'before the harvest is lost.',
+    heroBadge: 'Drought-specific oracle layer for Solana →',
+    heroTitleTop: 'Satellites see drought.',
+    heroTitleBottom: 'Smart contracts pay farmers.',
     heroSub:
-      'A public-benefit payout rail for the agricultural sector. Our Dual-Validation architecture ensures zero trust: OpenAI analyzes satellite data, but the Anchor smart contract controls the funds.',
-    heroStats: ['TX FINALITY', 'NDVI RESOLUTION', 'ON-CHAIN ENFORCEMENT', 'HUMAN BIAS'],
+      'A drought-specific oracle for parametric insurance protocols and public farmer relief programs. We turn NDVI and climate signals into verifiable on-chain payout triggers on Solana.',
+    heroStats: ['FINALIZED TX', 'NDVI RESOLUTION', 'ON-CHAIN ENFORCEMENT', 'ORACLE QUORUM'],
     infraLabel: 'Infrastructure stack',
     capabilitiesKicker: 'Capabilities',
-    capabilitiesTitle: 'Secure AI + Satellite + Smart Contracts',
+    capabilitiesTitle: 'AI + Satellite + Anchor',
     capabilitiesDescription:
-      'Core modules adapted to Dala Network for hackathon demo and safe production path.',
+      'Explainable composite drought score. Oracle layer separated from application. Parametric protocols subscribe to the feed the same way DeFi protocols subscribe to Pyth — but for drought events.',
     featureCards: [
       {
-        title: 'NDVI Satellite Ingestion',
-        body: 'Normalize Sentinel-derived NDVI + climate context in real time for each payout region.',
-        status: '847K tiles/day',
+        title: 'NDVI + Climate',
+        body: 'Sentinel and MODIS for vegetation index, OpenWeatherMap for climate. Weighted composite (0.4 / 0.4 / 0.2).',
+        status: 'Sentinel + MODIS',
       },
       {
-        title: 'OpenAI Drought Scoring',
-        body: 'AI computes explainable composite severity scores to prioritize climate-relief decisions.',
-        status: '97.3% confidence',
+        title: 'Explainable AI Score',
+        body: 'OpenAI streams reasoning over SSE; rule-based fallback runs when GPT-4o is unavailable. Every score includes a per-component breakdown.',
+        status: 'GPT-4o · fallback ready',
       },
       {
-        title: 'Anchor Dual-Validation',
-        body: 'AI recommends off-chain, but on-chain policy thresholds enforce final payout safety.',
-        status: '0 unsafe tx',
+        title: 'Dual-Validation in Anchor',
+        body: 'AI recommends off-chain. Anchor enforces score ≥ 55, ≤ 5 SOL cap, authorized oracle. M-of-N quorum on the roadmap.',
+        status: 'Devnet live',
       },
     ],
     integrationsTitle: 'Composable Integrations',
-    integrationsDescription: 'Everything needed for a deterministic public-benefit payout rail.',
+    integrationsDescription:
+      'Each layer — data, scoring, enforcement — is swappable. NDVI providers, AI engines, and oracle quorum members plug in via clear interfaces.',
     howItWorksKicker: 'How it works',
-    howItWorksTitle: 'From NDVI signal to on-chain relief',
+    howItWorksTitle: 'From NDVI signal to on-chain payout',
     steps: [
       {
         title: '1. Ingest data',
-        body: 'Satellite and climate feeds are normalized by region.',
+        body: 'Sentinel and MODIS NDVI plus OpenWeatherMap, normalized by region coordinates.',
       },
       {
-        title: '2. Score with OpenAI',
-        body: 'AI produces explainable drought severity scores.',
+        title: '2. AI scoring',
+        body: 'OpenAI with rule-based fallback produces an explainable drought score from 0 to 100.',
       },
       {
-        title: '3. Enforce with Anchor',
-        body: 'Contract guardrails validate strict payout thresholds.',
+        title: '3. Anchor enforcement',
+        body: 'The contract checks threshold, caps, and authorized oracle. Finalized commitment, no rollback.',
       },
       {
-        title: '4. Disburse safely',
-        body: 'Approved payouts execute on Solana with full audit trail.',
+        title: '4. Payout in minutes',
+        body: 'SOL lands in the farmer wallet with a full on-chain audit trail.',
       },
     ],
     liveOracleTitle: 'Live Oracle Pulse',
     liveOracleDescription: 'Dual-Validation timeline and throughput trend.',
     minEvalLabel: 'min eval',
     policyPassLabel: 'policy pass %',
-    problemVisionKicker: 'The Problem & Vision',
-    problemVisionTitle: 'Rebuilding climate relief rails for real-world impact',
+    problemVisionKicker: 'Problem & Solution',
+    problemVisionTitle: 'Fixing the payout rails for climate shocks',
     problemKicker: 'The Problem',
     problemText:
-      'Climate shocks are frequent, but government relief is manual, fragmented, and prone to corruption. Farmers wait months for help.',
+      'Drought caused over $40B in agricultural losses in 2024. 70% of smallholder farmers globally have no insurance access. Manual claims take 30–90 days. Public subsidy programs leak 15–40% to corruption.',
     solutionKicker: 'The Solution',
     solutionText:
-      'Parametric RWA infrastructure. We use Sentinel NDVI satellite data and AI to instantly verify drought impact, triggering automated payouts via Solana smart contracts.',
-    ctaTitle: 'Fast relief, enforced by policy.',
-    ctaDescription: 'Open the dashboard to run AI evaluation and verify on-chain safety checks.',
+      'A drought oracle layer on Solana. Parametric protocols (AMOCA-like), reinsurers, and public relief programs plug into one feed and one Anchor-enforced payout rail. Verifiable trigger, minutes not months, audit trail forever.',
+    customerKicker: 'Who it is for',
+    customerTitle: 'Three ICPs, one oracle',
+    customerCards: [
+      {
+        title: 'Parametric protocols',
+        body: 'AMOCA, SeedFlow, NOVA and the like — stream drought triggers into their smart contracts. $0.50 per evaluation, no infra to maintain.',
+        status: 'primary focus',
+      },
+      {
+        title: 'Reinsurers',
+        body: 'Munich Re and Swiss Re sandbox programs — white-label drought oracle for emerging-market portfolios. Every payout traceable on-chain.',
+        status: 'B2B traditional',
+      },
+      {
+        title: 'Public relief programs',
+        body: 'Ministries of agriculture and donor agencies — replace manual disbursement with automated, auditable rails. Pilots in Central Asia.',
+        status: 'Q3 2026 pilot',
+      },
+    ],
+    roadmapKicker: 'Roadmap',
+    roadmapTitle: 'Done and next',
+    roadmapItems: [
+      { tag: 'Q4 2025', text: 'Anchor program live on Devnet, dual-validation architecture', done: true },
+      { tag: 'Q4 2025', text: 'AI oracle MVP with fallback agent and SSE streaming', done: true },
+      { tag: 'Q1 2026', text: 'Colosseum Frontier submission — DePIN, Climate, Public Goods', done: true },
+      { tag: 'Q2 2026', text: 'Multi-oracle M-of-N quorum, parameterized policy terms', done: false },
+      { tag: 'Q2 2026', text: 'First parametric-protocol integration', done: false },
+      { tag: 'Q3 2026', text: 'Real Sentinel/MODIS NDVI ingestion, mainnet beta', done: false },
+      { tag: 'Q3 2026', text: 'Public-benefit pilot with one Central-Asian Ministry of Agriculture', done: false },
+      { tag: 'Q4 2026', text: 'Production launch, $1M+ TVL in subsidy pools', done: false },
+    ],
+    ctaTitle: 'Fast payouts, enforced by policy.',
+    ctaDescription:
+      'Open the dashboard to run an AI evaluation and verify on-chain safety checks.',
   },
 };
 
@@ -480,7 +544,7 @@ export default function Landing({ onLaunch, language = 'ru', onLanguageChange = 
           {/* Метрики */}
           <div className="hero-stats hero__stats">
             <div className="hero__stat">
-              <strong className="hero__stat-value">~400ms</strong>
+              <strong className="hero__stat-value">~13s</strong>
               <span className="hero__stat-label">{t.heroStats[0]}</span>
             </div>
             <div className="hero__stat">
@@ -492,7 +556,7 @@ export default function Landing({ onLaunch, language = 'ru', onLanguageChange = 
               <span className="hero__stat-label">{t.heroStats[2]}</span>
             </div>
             <div className="hero__stat">
-              <strong className="hero__stat-value">0%</strong>
+              <strong className="hero__stat-value">M-of-N</strong>
               <span className="hero__stat-label">{t.heroStats[3]}</span>
             </div>
           </div>
@@ -588,6 +652,45 @@ export default function Landing({ onLaunch, language = 'ru', onLanguageChange = 
               <p>{t.solutionText}</p>
             </article>
           </div>
+        </div>
+      </section>
+
+      <section className="landing-section" id="customer">
+        <div className="landing-container">
+          <div className="section-head reveal">
+            <span className="section-kicker">{t.customerKicker}</span>
+            <h2>{t.customerTitle}</h2>
+          </div>
+          <div className="feature-grid stagger">
+            {t.customerCards.map((card) => (
+              <article key={card.title} className="tilt-card feature-card">
+                <div className="feature-status">{card.status}</div>
+                <h3>{card.title}</h3>
+                <p>{card.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-section" id="roadmap">
+        <div className="landing-container">
+          <div className="section-head reveal">
+            <span className="section-kicker">{t.roadmapKicker}</span>
+            <h2>{t.roadmapTitle}</h2>
+          </div>
+          <ol className="roadmap-list stagger">
+            {t.roadmapItems.map((item, idx) => (
+              <li
+                key={`${item.tag}-${idx}`}
+                className={`roadmap-item${item.done ? ' roadmap-item--done' : ''}`}
+              >
+                <span className="roadmap-item__tag">{item.tag}</span>
+                <span className="roadmap-item__text">{item.text}</span>
+                <span className="roadmap-item__status">{item.done ? '● shipped' : '○ planned'}</span>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
 
