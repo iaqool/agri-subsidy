@@ -4,6 +4,16 @@ import { AgriSubsidy } from "../target/types/agri_subsidy";
 import { PublicKey, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { assert } from "chai";
 
+const EVAL_ID_LEN = 16;
+const MIN_SCORE = 55;
+const MAX_AMOUNT = new anchor.BN(5 * LAMPORTS_PER_SOL);
+
+function evalIdFromString(s: string): number[] {
+  const buf = Buffer.alloc(EVAL_ID_LEN);
+  buf.write(s, 0, "utf8");
+  return Array.from(buf);
+}
+
 describe("agri_subsidy", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
@@ -11,41 +21,53 @@ describe("agri_subsidy", () => {
   const program = anchor.workspace.AgriSubsidy as Program<AgriSubsidy>;
   const authority = provider.wallet as anchor.Wallet;
 
-  // Oracle keypair (наш Python-агент)
   const oracle = Keypair.generate();
+  const oracle2 = Keypair.generate();
+  const oracle3 = Keypair.generate();
 
-  // Demo farmer keypair
   const farmer = Keypair.generate();
+  const farmer2 = Keypair.generate();
+  const farmer3 = Keypair.generate();
 
   let poolPda: PublicKey;
   let poolBump: number;
   let farmerAccountPda: PublicKey;
+  let farmer2Pda: PublicKey;
+  let farmer3Pda: PublicKey;
 
   before(async () => {
-    // Derive Pool PDA
     [poolPda, poolBump] = PublicKey.findProgramAddressSync(
       [Buffer.from("subsidy_pool"), authority.publicKey.toBuffer()],
       program.programId
     );
-
-    // Derive Farmer Account PDA
     [farmerAccountPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("farmer"), poolPda.toBuffer(), farmer.publicKey.toBuffer()],
       program.programId
     );
+    [farmer2Pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("farmer"), poolPda.toBuffer(), farmer2.publicKey.toBuffer()],
+      program.programId
+    );
+    [farmer3Pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("farmer"), poolPda.toBuffer(), farmer3.publicKey.toBuffer()],
+      program.programId
+    );
 
-    // Airdrop to oracle and farmer for fees
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(oracle.publicKey, 2 * LAMPORTS_PER_SOL)
-    );
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(farmer.publicKey, 0.1 * LAMPORTS_PER_SOL)
-    );
+    for (const kp of [oracle, oracle2, oracle3]) {
+      await provider.connection.confirmTransaction(
+        await provider.connection.requestAirdrop(kp.publicKey, 2 * LAMPORTS_PER_SOL)
+      );
+    }
+    for (const kp of [farmer, farmer2, farmer3]) {
+      await provider.connection.confirmTransaction(
+        await provider.connection.requestAirdrop(kp.publicKey, 0.1 * LAMPORTS_PER_SOL)
+      );
+    }
   });
 
-  it("✅ initializes the subsidy pool", async () => {
+  it("initialises a pool with parametrised policy and a single oracle", async () => {
     await program.methods
-      .initializeSubsidyPool(poolBump)
+      .initializeSubsidyPool(poolBump, MIN_SCORE, MAX_AMOUNT, 1)
       .accounts({
         authority: authority.publicKey,
         oracle: oracle.publicKey,
@@ -56,14 +78,56 @@ describe("agri_subsidy", () => {
 
     const pool = await program.account.subsidyPool.fetch(poolPda);
     assert.equal(pool.authority.toString(), authority.publicKey.toString());
-    assert.equal(pool.oracle.toString(), oracle.publicKey.toString());
-    assert.equal(pool.farmerCount.toNumber(), 0);
+    assert.equal(pool.oracleCount, 1);
+    assert.equal(pool.quorum, 1);
+    assert.equal(pool.minScore, MIN_SCORE);
+    assert.equal(pool.maxAmountPerPayout.toString(), MAX_AMOUNT.toString());
+    assert.equal(pool.oracles[0].toString(), oracle.publicKey.toString());
     assert.isTrue(pool.isActive);
-
-    console.log("Pool initialized at:", poolPda.toString());
   });
 
-  it("✅ registers a farmer", async () => {
+  it("registers two more oracles via register_oracle", async () => {
+    await program.methods
+      .registerOracle()
+      .accounts({
+        authority: authority.publicKey,
+        newOracle: oracle2.publicKey,
+        pool: poolPda,
+      })
+      .rpc();
+
+    await program.methods
+      .registerOracle()
+      .accounts({
+        authority: authority.publicKey,
+        newOracle: oracle3.publicKey,
+        pool: poolPda,
+      })
+      .rpc();
+
+    const pool = await program.account.subsidyPool.fetch(poolPda);
+    assert.equal(pool.oracleCount, 3);
+    assert.equal(pool.oracles[1].toString(), oracle2.publicKey.toString());
+    assert.equal(pool.oracles[2].toString(), oracle3.publicKey.toString());
+  });
+
+  it("rejects duplicate oracle registration", async () => {
+    try {
+      await program.methods
+        .registerOracle()
+        .accounts({
+          authority: authority.publicKey,
+          newOracle: oracle2.publicKey,
+          pool: poolPda,
+        })
+        .rpc();
+      assert.fail("Should have thrown OracleAlreadyRegistered");
+    } catch (e: any) {
+      assert.include(e.message, "OracleAlreadyRegistered");
+    }
+  });
+
+  it("registers a farmer", async () => {
     await program.methods
       .registerFarmer("UA-ZAPORIZHZHIA")
       .accounts({
@@ -76,24 +140,22 @@ describe("agri_subsidy", () => {
       .rpc();
 
     const farmerAcc = await program.account.farmerAccount.fetch(farmerAccountPda);
-    assert.equal(farmerAcc.wallet.toString(), farmer.publicKey.toString());
     assert.equal(farmerAcc.region, "UA-ZAPORIZHZHIA");
     assert.deepEqual(farmerAcc.status, { pending: {} });
-
-    console.log("Farmer registered:", farmer.publicKey.toString());
   });
 
-  it("✅ releases funds by oracle when score >= 55", async () => {
-    // Fund the pool PDA
-    const fundTx = await provider.connection.requestAirdrop(poolPda, 3 * LAMPORTS_PER_SOL);
+  it("releases funds via single-oracle path while quorum=1", async () => {
+    const fundTx = await provider.connection.requestAirdrop(
+      poolPda,
+      4 * LAMPORTS_PER_SOL
+    );
     await provider.connection.confirmTransaction(fundTx);
 
-    const farmerBalanceBefore = await provider.connection.getBalance(farmer.publicKey);
+    const before = await provider.connection.getBalance(farmer.publicKey);
     const amount = new anchor.BN(1.5 * LAMPORTS_PER_SOL);
-    const aiScore = 78;
 
     await program.methods
-      .releaseFundsByOracle(amount, aiScore)
+      .releaseFundsByOracle(amount, 78)
       .accounts({
         oracle: oracle.publicKey,
         farmerWallet: farmer.publicKey,
@@ -106,25 +168,15 @@ describe("agri_subsidy", () => {
 
     const farmerAcc = await program.account.farmerAccount.fetch(farmerAccountPda);
     assert.deepEqual(farmerAcc.status, { approved: {} });
-    assert.equal(farmerAcc.score, aiScore);
+    assert.equal(farmerAcc.score, 78);
 
-    const farmerBalanceAfter = await provider.connection.getBalance(farmer.publicKey);
-    assert.isTrue(farmerBalanceAfter > farmerBalanceBefore);
-
-    console.log(`Released ${amount.toNumber() / LAMPORTS_PER_SOL} SOL to farmer`);
-    console.log(`Farmer balance: ${farmerBalanceAfter / LAMPORTS_PER_SOL} SOL`);
+    const after = await provider.connection.getBalance(farmer.publicKey);
+    assert.isTrue(after > before);
   });
 
-  it("❌ rejects release when score < 55", async () => {
-    // Register a second farmer
-    const farmer2 = Keypair.generate();
-    const [farmer2Pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("farmer"), poolPda.toBuffer(), farmer2.publicKey.toBuffer()],
-      program.programId
-    );
-
+  it("rejects single-oracle release when score below pool.min_score", async () => {
     await program.methods
-      .registerFarmer("EG-NILE-DELTA")
+      .registerFarmer("KZ-AKTOBE")
       .accounts({
         payer: authority.publicKey,
         farmerWallet: farmer2.publicKey,
@@ -134,7 +186,6 @@ describe("agri_subsidy", () => {
       })
       .rpc();
 
-    // Try to release with score 40 (below threshold)
     try {
       await program.methods
         .releaseFundsByOracle(new anchor.BN(1 * LAMPORTS_PER_SOL), 40)
@@ -147,40 +198,231 @@ describe("agri_subsidy", () => {
         })
         .signers([oracle])
         .rpc();
-      assert.fail("Should have thrown ScoreBelowThreshold error");
+      assert.fail("Should have thrown ScoreBelowThreshold");
     } catch (e: any) {
       assert.include(e.message, "ScoreBelowThreshold");
-      console.log("✅ Correctly rejected: score 40 < threshold 55");
     }
   });
 
-  it("❌ rejects unauthorized oracle", async () => {
+  it("rejects unauthorized oracle (not registered on pool)", async () => {
     const fakeOracle = Keypair.generate();
+    await provider.connection.confirmTransaction(
+      await provider.connection.requestAirdrop(fakeOracle.publicKey, 0.5 * LAMPORTS_PER_SOL)
+    );
 
     try {
       await program.methods
         .releaseFundsByOracle(new anchor.BN(1 * LAMPORTS_PER_SOL), 90)
         .accounts({
           oracle: fakeOracle.publicKey,
-          farmerWallet: farmer.publicKey,
-          farmerAccount: farmerAccountPda,
+          farmerWallet: farmer2.publicKey,
+          farmerAccount: farmer2Pda,
           pool: poolPda,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([fakeOracle])
         .rpc();
-      assert.fail("Should have thrown UnauthorizedOracle error");
+      assert.fail("Should have thrown UnauthorizedOracle");
     } catch (e: any) {
       assert.include(e.message, "UnauthorizedOracle");
-      console.log("✅ Correctly rejected unauthorized oracle");
     }
   });
 
-  it("📊 verifies pool stats after operations", async () => {
+  it("update_quorum: switches the pool to 2-of-3", async () => {
+    await program.methods
+      .updateQuorum(2)
+      .accounts({
+        authority: authority.publicKey,
+        pool: poolPda,
+      })
+      .rpc();
+
     const pool = await program.account.subsidyPool.fetch(poolPda);
-    console.log("Total disbursed:", pool.totalDisbursed.toNumber() / LAMPORTS_PER_SOL, "SOL");
-    console.log("Farmer count:", pool.farmerCount.toNumber());
-    assert.isTrue(pool.totalDisbursed.toNumber() > 0);
-    assert.equal(pool.farmerCount.toNumber(), 2);
+    assert.equal(pool.quorum, 2);
+    assert.equal(pool.oracleCount, 3);
+  });
+
+  it("blocks single-oracle path once quorum > 1", async () => {
+    try {
+      await program.methods
+        .releaseFundsByOracle(new anchor.BN(1 * LAMPORTS_PER_SOL), 80)
+        .accounts({
+          oracle: oracle.publicKey,
+          farmerWallet: farmer2.publicKey,
+          farmerAccount: farmer2Pda,
+          pool: poolPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([oracle])
+        .rpc();
+      assert.fail("Should have thrown QuorumPathRequired");
+    } catch (e: any) {
+      assert.include(e.message, "QuorumPathRequired");
+    }
+  });
+
+  describe("M-of-N attestation flow", () => {
+    const evalId = evalIdFromString("eval-001");
+    let attestationPda: PublicKey;
+    const amount = new anchor.BN(2 * LAMPORTS_PER_SOL);
+    const score = 82;
+
+    before(async () => {
+      await program.methods
+        .registerFarmer("KG-ISSYK-KUL")
+        .accounts({
+          payer: authority.publicKey,
+          farmerWallet: farmer3.publicKey,
+          farmerAccount: farmer3Pda,
+          pool: poolPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+
+      [attestationPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("attestation"), farmer3Pda.toBuffer(), Buffer.from(evalId)],
+        program.programId
+      );
+    });
+
+    it("first oracle attests — quorum not reached", async () => {
+      await program.methods
+        .attestPayout(evalId, score, amount)
+        .accounts({
+          oracle: oracle.publicKey,
+          farmerWallet: farmer3.publicKey,
+          farmerAccount: farmer3Pda,
+          pool: poolPda,
+          attestation: attestationPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([oracle])
+        .rpc();
+
+      const att = await program.account.payoutAttestation.fetch(attestationPda);
+      assert.equal(att.attestingCount, 1);
+      assert.equal(att.amount.toString(), amount.toString());
+      assert.equal(att.aiScore, score);
+      assert.isFalse(att.isExecuted);
+    });
+
+    it("execute_payout fails before quorum is reached", async () => {
+      try {
+        await program.methods
+          .executePayout(evalId)
+          .accounts({
+            executor: authority.publicKey,
+            farmerWallet: farmer3.publicKey,
+            farmerAccount: farmer3Pda,
+            pool: poolPda,
+            attestation: attestationPda,
+          })
+          .rpc();
+        assert.fail("Should have thrown QuorumNotReached");
+      } catch (e: any) {
+        assert.include(e.message, "QuorumNotReached");
+      }
+    });
+
+    it("rejects mismatched attestation values from second oracle", async () => {
+      try {
+        await program.methods
+          .attestPayout(evalId, score, amount.add(new anchor.BN(LAMPORTS_PER_SOL)))
+          .accounts({
+            oracle: oracle2.publicKey,
+            farmerWallet: farmer3.publicKey,
+            farmerAccount: farmer3Pda,
+            pool: poolPda,
+            attestation: attestationPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([oracle2])
+          .rpc();
+        assert.fail("Should have thrown AttestationMismatch");
+      } catch (e: any) {
+        assert.include(e.message, "AttestationMismatch");
+      }
+    });
+
+    it("rejects double attestation by same oracle", async () => {
+      try {
+        await program.methods
+          .attestPayout(evalId, score, amount)
+          .accounts({
+            oracle: oracle.publicKey,
+            farmerWallet: farmer3.publicKey,
+            farmerAccount: farmer3Pda,
+            pool: poolPda,
+            attestation: attestationPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([oracle])
+          .rpc();
+        assert.fail("Should have thrown OracleAlreadyAttested");
+      } catch (e: any) {
+        assert.include(e.message, "OracleAlreadyAttested");
+      }
+    });
+
+    it("second oracle attests — quorum reached", async () => {
+      await program.methods
+        .attestPayout(evalId, score, amount)
+        .accounts({
+          oracle: oracle2.publicKey,
+          farmerWallet: farmer3.publicKey,
+          farmerAccount: farmer3Pda,
+          pool: poolPda,
+          attestation: attestationPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([oracle2])
+        .rpc();
+
+      const att = await program.account.payoutAttestation.fetch(attestationPda);
+      assert.equal(att.attestingCount, 2);
+    });
+
+    it("execute_payout succeeds and pays the farmer", async () => {
+      const before = await provider.connection.getBalance(farmer3.publicKey);
+
+      await program.methods
+        .executePayout(evalId)
+        .accounts({
+          executor: authority.publicKey,
+          farmerWallet: farmer3.publicKey,
+          farmerAccount: farmer3Pda,
+          pool: poolPda,
+          attestation: attestationPda,
+        })
+        .rpc();
+
+      const after = await provider.connection.getBalance(farmer3.publicKey);
+      assert.isTrue(after - before >= amount.toNumber() - 100_000);
+
+      const att = await program.account.payoutAttestation.fetch(attestationPda);
+      assert.isTrue(att.isExecuted);
+
+      const farmerAcc = await program.account.farmerAccount.fetch(farmer3Pda);
+      assert.deepEqual(farmerAcc.status, { approved: {} });
+      assert.equal(farmerAcc.score, score);
+    });
+
+    it("execute_payout rejects double execution", async () => {
+      try {
+        await program.methods
+          .executePayout(evalId)
+          .accounts({
+            executor: authority.publicKey,
+            farmerWallet: farmer3.publicKey,
+            farmerAccount: farmer3Pda,
+            pool: poolPda,
+            attestation: attestationPda,
+          })
+          .rpc();
+        assert.fail("Should have thrown AlreadyExecuted");
+      } catch (e: any) {
+        assert.include(e.message, "AlreadyExecuted");
+      }
+    });
   });
 });
