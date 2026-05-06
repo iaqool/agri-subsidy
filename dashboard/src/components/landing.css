@@ -1006,3 +1006,76 @@ a[href*='unicornplatform'],
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+.roadmap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.roadmap-item {
+  display: grid;
+  grid-template-columns: 100px 1fr 110px;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 22px;
+  border: 1px solid var(--landing-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.roadmap-item:hover {
+  border-color: rgba(165, 180, 252, 0.35);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.roadmap-item--done {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.roadmap-item--done .roadmap-item__status {
+  color: rgba(34, 197, 94, 0.95);
+}
+
+.roadmap-item__tag {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--landing-muted);
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--landing-border);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.roadmap-item__text {
+  color: var(--landing-text);
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+.roadmap-item__status {
+  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--landing-muted);
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .roadmap-item {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .roadmap-item__tag,
+  .roadmap-item__status {
+    text-align: left;
+  }
+}

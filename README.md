@@ -1,20 +1,66 @@
-# Dala Network — Public-Benefit Payout Rail for Climate Relief
+# Dala Network — Drought Oracle Layer for Solana
 
-Dala Network is an AI oracle for drought-triggered public-benefit payouts on Solana.
-It combines off-chain climate intelligence with on-chain policy enforcement, so aid can be fast, auditable, and resistant to manipulation.
+Dala Network is a drought-specific oracle layer on Solana. Parametric insurance protocols, reinsurers, and public farmer-relief programs subscribe to a single feed and a single Anchor-enforced payout rail — the same way DeFi protocols subscribe to Pyth, but for drought events.
+
+Live on Devnet · [agri-subsidy.vercel.app](https://agri-subsidy.vercel.app/) · Program: `971ZxLBhqc9p7rqCX5UkpknEo4AJUfG15UqT99GZbXpB`
 
 ## Track
 
-**Decentrathon / AI + Blockchain**
+**Colosseum Frontier Hackathon** — targeting DePIN, Climate Award, and Public Goods nominations.
 
-## What It Does
+## The Problem
 
-Government climate aid is manual, delayed, and opaque. Dala Network automates drought relief:
+- Drought caused over **$40B** in agricultural losses in 2024
+- **70%** of smallholder farmers globally have no access to crop insurance
+- Manual claims pipelines take **30–90 days**, often longer
+- Public subsidy programs leak **15–40%** to corruption and fraud
+- Existing parametric products on EVM (Etherisc, Arbol) rely on simple rainfall thresholds — single-signal, low accuracy in mixed-drought conditions
 
-1. Collects satellite NDVI + weather data for a farmer's region
-2. AI evaluates drought severity and produces an explainable composite score
-3. If the score passes the threshold — the smart contract releases funds to the farmer's Solana wallet
-4. Everything is on-chain: auditable, transparent, tamper-proof
+## The Solution
+
+A drought oracle layer that turns satellite NDVI and climate signals into verifiable on-chain payout triggers on Solana.
+
+1. Sentinel and MODIS NDVI plus OpenWeatherMap data normalized by region
+2. AI produces an explainable composite drought score (NDVI + weather + history, weighted 0.4 / 0.4 / 0.2)
+3. Anchor program enforces final policy — score ≥ 55, amount ≤ 5 SOL, authorized oracle, active pool
+4. Approved payout commits in seconds, with a full on-chain audit trail
+
+## Who It Is For
+
+| ICP | What we provide | Status |
+|-----|-----------------|--------|
+| **Parametric insurance protocols** (AMOCA, SeedFlow, NOVA and the like) | Drought trigger feed, $0.50 per evaluation, no infra to maintain | Primary focus |
+| **Reinsurers** (Munich Re / Swiss Re sandbox programs) | White-label drought oracle for emerging-market portfolios with on-chain audit trail | B2B traditional |
+| **Public relief programs** (ministries of agriculture, donor agencies) | Replacement for manual disbursement, automated and auditable | Q3 2026 pilot, Central Asia |
+
+## Status
+
+- Anchor program deployed on Devnet (`971ZxLBhqc9p7rqCX5UkpknEo4AJUfG15UqT99GZbXpB`)
+- Backend live with OpenAI streaming + rule-based fallback
+- Dashboard deployed on Vercel
+- NDVI ingestion currently simulated (deterministic per coordinates); real Sentinel/MODIS integration is on the roadmap
+- Single-oracle authority on Devnet; M-of-N quorum is on the roadmap
+
+## Roadmap
+
+| When | What |
+|------|------|
+| Q4 2025 · done | Anchor program on Devnet, dual-validation architecture |
+| Q4 2025 · done | AI oracle MVP with fallback agent and SSE streaming |
+| Q1 2026 · done | Colosseum Frontier submission |
+| Q2 2026 | Multi-oracle M-of-N quorum, parameterized policy terms |
+| Q2 2026 | First parametric-protocol integration |
+| Q3 2026 | Real Sentinel / MODIS NDVI ingestion, mainnet beta |
+| Q3 2026 | Public-benefit pilot with one Central-Asian Ministry of Agriculture |
+| Q4 2026 | Production launch, $1M+ TVL in subsidy pools |
+
+## Honest Note on Competition
+
+Three projects on Solana touch the parametric-insurance space (AMOCA, SeedFlow, NOVA — all Breakout / Cypherpunk hackathon prototypes). None target drought specifically, none combine NDVI + weather + history into a composite explainable score, none ship a separate oracle layer. We are not their competitor — we are the data layer they can use. On EVM, Etherisc and Arbol use rainfall thresholds; we use a multi-signal score plus dual-validation.
+
+## What It Does (one-liner)
+
+For parametric protocols and public programs, Dala Network turns drought into a smart-contract event. NDVI in, payout out, audit trail forever.
 
 ## Dual-Validation Architecture
 
@@ -172,12 +218,13 @@ Frontend: `cd dashboard && npm run build` → serve `dist/` with any static host
 
 ## Why Solana
 
-- Low fees suitable for micro-disbursements
-- High throughput and fast confirmation
-- Public, verifiable transaction history for accountability
+- Sub-second slot times and ~13s finalization make oracle updates economic at micro-policy scale
+- Low fees keep $1–$50 per-policy economics viable; on EVM the gas alone would eat the premium
+- Public, verifiable transaction history is exactly what reinsurers and donors need for audit
+- Anchor's account model fits multi-pool, multi-oracle policy enforcement cleanly
 
 ## Submission Notes
 
-- Designed for live demo under hackathon constraints
-- NDVI data is simulated in MVP (deterministic based on coordinates)
-- Demo includes a stress-case farmer profile (Aktobe Region) to show drought-triggered payout
+- Live demo on [agri-subsidy.vercel.app](https://agri-subsidy.vercel.app/) under hackathon constraints
+- NDVI data is simulated in MVP (deterministic based on coordinates); real Sentinel/MODIS ingestion ships in Q3 2026
+- Demo includes a stress-case farmer profile (Aktobe Region) to show a drought-triggered payout end-to-end
