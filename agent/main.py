@@ -52,14 +52,28 @@ app = FastAPI(
     ),
 )
 
-_allowed_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173",
-).split(",")
+# Explicit origins (exact match) — local dev + the canonical Vercel deploy.
+# Override via CORS_ORIGINS for additional domains (custom hostnames, staging).
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173,"
+    "http://127.0.0.1:5173,"
+    "https://agri-subsidy.vercel.app"
+)
+_allowed_origins = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",") if o.strip()
+]
+
+# Vercel preview deploys use rotating subdomains (`agri-subsidy-git-*.vercel.app`),
+# so we also match them via regex. Ops can override with CORS_ORIGIN_REGEX.
+_allowed_origin_regex = os.getenv(
+    "CORS_ORIGIN_REGEX",
+    r"https://agri-subsidy(-[a-z0-9-]+)?\.vercel\.app",
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _allowed_origins if o.strip()],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=_allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
