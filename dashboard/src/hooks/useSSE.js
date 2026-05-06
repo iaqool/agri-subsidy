@@ -6,14 +6,32 @@ const normalizedApiBase = /^https?:\/\//i.test(rawApiBase)
   : `https://${rawApiBase}`;
 const API_BASE = normalizedApiBase.replace(/\/$/, '');
 
+// Browsers report CORS-rejected fetches and total network failures with the
+// same opaque TypeError. We ping /health in `no-cors` mode to distinguish:
+// if the host is reachable but the proper fetch failed, the issue is CORS.
+async function probeReachability() {
+  try {
+    await fetch(`${API_BASE}/health`, { method: 'GET', mode: 'no-cors' });
+    return 'reachable';
+  } catch {
+    return 'unreachable';
+  }
+}
+
 async function requestJson(path, options) {
   let response;
 
   try {
     response = await fetch(`${API_BASE}${path}`, options);
   } catch {
+    const reach = await probeReachability();
+    if (reach === 'reachable') {
+      throw new Error(
+        `Dala API rejected the request from this origin (CORS). Add ${window.location.origin} to CORS_ORIGINS on the backend (${API_BASE}).`,
+      );
+    }
     throw new Error(
-      `Dala API is offline. Check VITE_API_BASE_URL or start backend on ${API_BASE}.`,
+      `Cannot reach Dala API at ${API_BASE}. Check VITE_API_BASE_URL on Vercel or start the backend locally on this host.`,
     );
   }
 
