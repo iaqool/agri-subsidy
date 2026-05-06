@@ -1,17 +1,30 @@
 import ScoreGauge from './ScoreGauge';
 import TxConfirmation from './TxConfirmation';
 
-// Country/region labels for demo farmer wallets
+// Country/region labels for demo farmer wallets. Drought-scenario farmers
+// are seeded with a `label` field on the backend (see DEMO_FARMERS in
+// agent/main.py); for everything else we fall back to this map keyed on
+// wallet address.
 const REGION_NAMES = {
   '4pMnsypmRtd94bK94LXjFPWghpXN5WfCcLvnJhoUdX5z': { name: 'Kostanay Region', flag: '🇰🇿', crop: 'Wheat' },
   'EeqwDr7kNxp4y9vj4MaQijv4BmgAm3WXArzZM5WikD6U': { name: 'North Kazakhstan', flag: '🇰🇿', crop: 'Wheat' },
   'CHaGvsfMx5YKE3mYq7huQM6keRN2UUsfhwAZMypWw7KC': { name: 'Akmola Region', flag: '🇰🇿', crop: 'Wheat' },
   'FZA62o7rNFBmx5g1hFyCmpRYWhpxAHTiqnYUaRd7EGfL': { name: 'Aktobe Region', flag: '🇰🇿', crop: 'Wheat' },
   '8jm7bVG8CiqxDmohHUuMk5R3WZkucTrXPUDsDhzvLQ3p': { name: 'Almaty Region', flag: '🇰🇿', crop: 'Corn' },
+  '6zMppjRuXGdUqe9LU51wvCo8ZgbKEAbJv4ke85rY8LD8': { name: 'Aralkum (former Aral Sea)', flag: '🏜️', crop: 'Drought scenario', demo: true },
+  '7V9GTiEGej451eo11fpYPR4xe5BDE6QDBNGjyRwCt76W': { name: 'Karakum desert (TM)',      flag: '🏜️', crop: 'Drought scenario', demo: true },
 };
 
-function getRegionInfo(wallet) {
-  return REGION_NAMES[wallet] ?? { name: `${wallet.slice(0, 12)}...`, flag: '🌍', crop: 'Mixed' };
+function getRegionInfo(farmer) {
+  // Server-supplied label takes precedence; falls back to the wallet map.
+  if (farmer.label) {
+    const fromMap = REGION_NAMES[farmer.wallet];
+    return fromMap ?? { name: farmer.label, flag: '🌍', crop: 'Mixed' };
+  }
+  return (
+    REGION_NAMES[farmer.wallet] ??
+    { name: `${farmer.wallet.slice(0, 12)}...`, flag: '🌍', crop: 'Mixed' }
+  );
 }
 
 function StatusBadge({ status }) {
@@ -25,7 +38,7 @@ function StatusBadge({ status }) {
 }
 
 export default function FarmerCard({ farmer, selected, onSelect, onEvaluate, evaluating }) {
-  const region = getRegionInfo(farmer.wallet);
+  const region = getRegionInfo(farmer);
   const isEvaluating = evaluating && selected;
 
   const cardStyle = {
@@ -67,7 +80,21 @@ export default function FarmerCard({ farmer, selected, onSelect, onEvaluate, eva
             {region.flag}
           </div>
           <div>
-            <p style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.2 }}>{region.name}</p>
+            <p style={{ fontWeight: 700, fontSize: 13, lineHeight: 1.2 }}>
+              {region.name}
+              {region.demo && (
+                <span style={{
+                  marginLeft: 6, padding: '1px 6px', borderRadius: 4,
+                  fontSize: 9, fontWeight: 600, letterSpacing: 0.4,
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  color: 'rgb(245, 158, 11)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  textTransform: 'uppercase',
+                }}>
+                  demo
+                </span>
+              )}
+            </p>
             <p style={{ fontSize: 11, color: 'var(--clr-text-3)', marginTop: 2 }}>🌱 {region.crop}</p>
           </div>
         </div>

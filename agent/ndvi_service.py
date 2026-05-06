@@ -46,6 +46,35 @@ def _band_base_ndvi(lat: float) -> float:
     return 0.18
 
 
+# Major arid biomes that the latitude-band heuristic alone cannot detect.
+# Bounding boxes are coarse on purpose — the simulator is a stand-in for
+# real Sentinel-2 ingestion, so over-specifying would be misleading false
+# precision. Offsets are subtracted from the band base to push baseline
+# vegetation toward the empirical reality of these biomes.
+_ARID_ZONES: tuple[dict, ...] = (
+    {"name": "Sahara/Sahel", "lat": (12.0, 30.0), "lon": (-17.0, 40.0), "offset": -0.45},
+    {"name": "Arabian Peninsula", "lat": (15.0, 30.0), "lon": (35.0, 55.0), "offset": -0.45},
+    {"name": "Atacama / Coastal Andes", "lat": (-30.0, -15.0), "lon": (-75.0, -68.0), "offset": -0.45},
+    {"name": "Iranian Plateau", "lat": (25.0, 36.0), "lon": (52.0, 75.0), "offset": -0.40},
+    {"name": "Aralkum / Karakum / Kyzylkum", "lat": (38.0, 48.0), "lon": (53.0, 70.0), "offset": -0.40},
+    {"name": "Gobi", "lat": (40.0, 48.0), "lon": (95.0, 115.0), "offset": -0.35},
+    {"name": "Australian Outback", "lat": (-33.0, -18.0), "lon": (115.0, 145.0), "offset": -0.35},
+    {"name": "Kalahari / Namib", "lat": (-28.0, -18.0), "lon": (15.0, 28.0), "offset": -0.35},
+    {"name": "Great Basin (US)", "lat": (35.0, 45.0), "lon": (-120.0, -110.0), "offset": -0.30},
+    {"name": "Patagonia (steppe)", "lat": (-50.0, -38.0), "lon": (-72.0, -64.0), "offset": -0.30},
+)
+
+
+def _arid_zone_offset(lat: float, lon: float) -> float:
+    """Return a negative NDVI offset if (lat, lon) falls inside a known arid biome."""
+    for zone in _ARID_ZONES:
+        lat_min, lat_max = zone["lat"]
+        lon_min, lon_max = zone["lon"]
+        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            return zone["offset"]
+    return 0.0
+
+
 def _seasonal_adjustment(lat: float, month: int) -> float:
     """Northern-hemisphere growing season peaks in July; mirror for southern."""
     # Map month to a -1..1 sine wave with peak at June/July
@@ -63,9 +92,14 @@ def _coord_noise(seed: int) -> float:
     return ((seed % 16001) / 16000.0 - 0.5) * 0.16
 
 
-def _historical_avg(lat: float, seed: int) -> float:
-    """Long-term mean ignores seasonality but keeps coordinate-specific bias."""
-    base = _band_base_ndvi(lat)
+def _historical_avg(lat: float, lon: float, seed: int) -> float:
+    """Long-term mean ignores seasonality but keeps coordinate-specific bias.
+
+    Arid-zone offset is also baked in so the historical baseline reflects
+    the biome — otherwise low current NDVI in a desert would always trip
+    `anomalous_drop` against a misleadingly green historical average.
+    """
+    base = _band_base_ndvi(lat) + _arid_zone_offset(lat, lon)
     return max(0.05, min(0.95, base + _coord_noise(seed) * 0.5))
 
 
@@ -107,11 +141,11 @@ async def fetch_historical_ndvi(
 
     when = now or datetime.utcnow()
     seed = _coord_seed(lat, lon)
-    base = _band_base_ndvi(lat) + _coord_noise(seed)
+    base = _band_base_ndvi(lat) + _arid_zone_offset(lat, lon) + _coord_noise(seed)
     seasonal = _seasonal_adjustment(lat, when.month)
     current = max(0.05, min(0.95, base + seasonal))
 
-    historical = _historical_avg(lat, seed)
+    historical = _historical_avg(lat, lon, seed)
     alert = _alert_label(current, historical)
 
     return {

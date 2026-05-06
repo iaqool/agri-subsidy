@@ -50,3 +50,4 @@ class FarmerStatus(BaseModel):
     status: str  # "pending", "approved", "rejected"
     score: Optional[int] = None
     tx_signature: Optional[str] = None
+    label: Optional[str] = None  # human-readable region tag for demo / dashboard UI

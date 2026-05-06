@@ -7,6 +7,7 @@ import pytest
 
 from ndvi_service import (
     _alert_label,
+    _arid_zone_offset,
     _band_base_ndvi,
     _seasonal_adjustment,
     fetch_historical_ndvi,
@@ -99,3 +100,59 @@ def test_fetch_historical_ndvi_returns_expected_keys():
     assert 0 <= result["current_ndvi"] <= 1
     assert 0 <= result["historical_avg"] <= 1
     assert result["source"] == "simulated"
+
+
+@pytest.mark.parametrize(
+    "name, lat, lon",
+    [
+        ("Aralkum (KZ)", 45.5, 59.0),
+        ("Karakum (TM)", 39.5, 60.0),
+        ("Sahara (NE)", 14.5, 9.0),
+        ("Outback (AU)", -25.0, 134.0),
+    ],
+)
+def test_arid_zone_offset_negative_inside_known_biomes(name, lat, lon):
+    assert _arid_zone_offset(lat, lon) < 0, f"{name} should sit inside an arid biome"
+
+
+@pytest.mark.parametrize(
+    "name, lat, lon",
+    [
+        ("Almaty (KZ)", 43.8, 77.1),
+        ("Petropavlovsk (KZ)", 54.9, 69.1),
+        ("Berlin (DE)", 52.5, 13.4),
+        ("Sao Paulo (BR)", -23.5, -46.6),
+    ],
+)
+def test_arid_zone_offset_zero_outside_biomes(name, lat, lon):
+    assert _arid_zone_offset(lat, lon) == 0.0, f"{name} should NOT be inside an arid biome"
+
+
+@pytest.mark.parametrize(
+    "name, lat, lon",
+    [
+        # These are the demo seed coords used by /api/demo/seed for the
+        # "drought scenario" farmers. They must trigger severe_drought
+        # year-round so pitch demos are reliable regardless of evaluation date.
+        ("Aralkum (KZ side)", 45.5, 59.0),
+        ("Karakum (TM)", 39.5, 60.0),
+    ],
+)
+def test_demo_drought_seed_coords_yield_severe_alert_year_round(name, lat, lon):
+    async def run():
+        results = []
+        # Sample every other month — the seasonal adjustment is symmetric so
+        # the worst case for severe_drought is summer in northern hemisphere.
+        for month in (1, 3, 5, 7, 9, 11):
+            res = await fetch_historical_ndvi(
+                lat, lon, now=datetime(2026, month, 15), sleep_s=0
+            )
+            results.append((month, res))
+        return results
+
+    results = asyncio.run(run())
+    for month, res in results:
+        assert res["alert"] in ("severe_drought", "low_vegetation"), (
+            f"{name} on month {month}: expected drought alert, got {res['alert']} "
+            f"(NDVI={res['current_ndvi']})"
+        )
