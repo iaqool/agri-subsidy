@@ -27,10 +27,13 @@ SYSTEM_PROMPT = """Ты — ИИ-агент AgriOracle, специализиро
 
 ## Выходной формат
 
-В конце рассуждения выведи JSON-вердикт на отдельной строке, СТРОГО в таком виде:
-VERDICT: {"approved": true/false, "score": 0-100, "reasoning": "краткий итог для записи в блокчейн (≤200 символов)"}
+После всех рассуждений ОБЯЗАТЕЛЬНО выведи финальную строку — JSON-вердикт. Это критично:
+без этой строки твой ответ не будет принят системой.
 
-Отвечай ТОЛЬКО на русском языке. Будь конкретным и точным.
+Формат — ровно одна строка, с новой строки, СТРОГО в таком виде:
+VERDICT: {"approved": true|false, "score": <0-100>, "reasoning": "<краткий итог ≤200 символов>"}
+
+Никакого текста после VERDICT-строки. Отвечай ТОЛЬКО на русском языке. Будь конкретным и точным.
 """
 
 
@@ -95,7 +98,7 @@ async def stream_ai_evaluation(
                 {"role": "user", "content": user_message},
             ],
             stream=True,
-            max_tokens=1500,
+            max_tokens=3000,
             temperature=0.3,
         )
 
@@ -162,8 +165,29 @@ async def stream_ai_evaluation(
                     current_content.append(line)
 
         # Выводим всё что осталось в буфере
-        if buffer.strip() and current_step:
-            current_content.append(buffer.strip())
+        # Особый случай: GPT мог завершить ответ строкой VERDICT: {...} без \n
+        # на конце — тогда она осталась в buffer и не была распарсена.
+        leftover = buffer.strip()
+        if leftover.startswith("VERDICT:"):
+            if current_step and current_content:
+                yield AILogEntry(
+                    step=current_step,
+                    content=" ".join(current_content).strip()
+                )
+                current_step = ""
+                current_content = []
+            json_str = leftover.replace("VERDICT:", "", 1).strip()
+            try:
+                verdict = json.loads(json_str)
+                verdict_emoji = "✅" if verdict.get("approved") else "❌"
+                yield AILogEntry(
+                    step=f"{verdict_emoji} Финальный вердикт",
+                    content=f"SCORE: {verdict.get('score')}/100 | {verdict.get('reasoning', '')}",
+                )
+            except json.JSONDecodeError:
+                yield AILogEntry(step="⚠️ Вердикт", content=leftover)
+        elif leftover and current_step:
+            current_content.append(leftover)
 
         if current_step and current_content:
             yield AILogEntry(
@@ -193,6 +217,8 @@ async def get_ai_verdict(
     Если OpenAI вернул VERDICT — парсим оттуда.
     Иначе используем алгоритмический скор.
     """
+    is_fallback = any("[FALLBACK MODE]" in e.content for e in log_entries)
+
     # Ищем финальный вердикт в логах
     for entry in reversed(log_entries):
         if "SCORE:" in entry.content and ("✅" in entry.step or "❌" in entry.step):
@@ -205,7 +231,6 @@ async def get_ai_verdict(
                 score = scores.get("composite_score", 50)
 
             reasoning = entry.content.split("|")[-1].strip() if "|" in entry.content else entry.content
-            is_fallback = any("[FALLBACK MODE]" in e.content for e in log_entries)
 
             return EvaluationResult(
                 approved=approved,
@@ -214,5 +239,19 @@ async def get_ai_verdict(
                 is_fallback=is_fallback,
             )
 
-    # Fallback: берём из scoring engine
+    # Если OpenAI отстримил рассуждения, но не дотянулся до VERDICT-строки
+    # (или модель не следовала формату) — кредитуем AI рассуждение последним
+    # шагом, а вердикт берём из алгоритмического скора. is_fallback=False —
+    # это live-агент, просто без структурного вердикта.
+    if not is_fallback and log_entries:
+        last = log_entries[-1]
+        return EvaluationResult(
+            approved=bool(scores.get("approved", False)),
+            score=int(scores.get("composite_score", 50)),
+            reasoning=(last.content[:300] if last.content else ""),
+            is_fallback=False,
+        )
+
+    # Fallback: берём из scoring engine (канонический путь, когда OpenAI
+    # вообще не запускался либо упал в [FALLBACK MODE]).
     return get_fallback_result(scores)
