@@ -64,13 +64,21 @@ jobs:
     defaults:
       run:
         working-directory: contracts
+    # rust-toolchain.toml in contracts/ pins 1.75.0 for Anchor BPF builds, but
+    # newer transitive deps (toml_datetime) require edition2024 which 1.75
+    # doesn't support. We override the toolchain just for `cargo check` here —
+    # this CI step verifies the lib compiles, not BPF targets.
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: contracts
       - name: cargo check
-        run: cargo check --package agri_subsidy
+        run: cargo +stable check --package agri_subsidy
       - name: cargo clippy (informational)
-        run: cargo clippy --package agri_subsidy || true
+        run: cargo +stable clippy --package agri_subsidy || true
