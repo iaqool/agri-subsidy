@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("971ZxLBhqc9p7rqCX5UkpknEo4AJUfG15UqT99GZbXpB");
+declare_id!("2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK");
 
 pub const MAX_ORACLES: usize = 5;
 pub const EVAL_ID_LEN: usize = 16;

@@ -3,7 +3,7 @@ anchor_version = "0.29.0"
 solana_version = "1.18.0"
 
 [programs.devnet]
-agri_subsidy = "971ZxLBhqc9p7rqCX5UkpknEo4AJUfG15UqT99GZbXpB"
+agri_subsidy = "2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK"
 
 [registry]
 url = "https://api.apr.dev"

@@ -28,5 +28,3 @@
 
 # Rust / Anchor
 **/target/
-contracts/Cargo.lock
-contracts/programs/**/Cargo.lock
