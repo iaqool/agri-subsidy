@@ -2,7 +2,7 @@
 
 Dala Network is a drought-specific oracle layer on Solana. Parametric insurance protocols, reinsurers, and public farmer-relief programs subscribe to a single feed and a single Anchor-enforced payout rail — the same way DeFi protocols subscribe to Pyth, but for drought events.
 
-Live on Devnet · [agri-subsidy.vercel.app](https://agri-subsidy.vercel.app/) · Program: [`971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF`](https://explorer.solana.com/address/971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF?cluster=devnet)
+Live on Devnet · [agri-subsidy.vercel.app](https://agri-subsidy.vercel.app/) · Program: [`2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK`](https://explorer.solana.com/address/2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK?cluster=devnet) (M-of-N quorum build)
 
 ## Track
 
@@ -35,8 +35,9 @@ A drought oracle layer that turns satellite NDVI and climate signals into verifi
 
 ## Status
 
-- Anchor program deployed on Devnet at [`971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF`](https://explorer.solana.com/address/971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF?cluster=devnet) (single-oracle authority build)
-- M-of-N quorum + parameterized policy + idempotent attestation [merged in source](contracts/programs/agri_subsidy/src/lib.rs); the `declare_id!()` reserves `971ZxLBhqc9p7rqCX5UkpknEo4AJUfG15UqT99GZbXpB` for the next deploy. Redeploy is the next milestone
+- Anchor program deployed on Devnet at [`2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK`](https://explorer.solana.com/address/2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK?cluster=devnet) — full **M-of-N quorum** build with parameterized policy, oracle registry, and idempotent attestation flow ([source](contracts/programs/agri_subsidy/src/lib.rs))
+- Subsidy pool PDA: [`AxnVgXUfeDk7nXXjhjvVuWPEvxh2SXBbDieUxfvJ64KL`](https://explorer.solana.com/address/AxnVgXUfeDk7nXXjhjvVuWPEvxh2SXBbDieUxfvJ64KL?cluster=devnet) (initialized with `min_score=55`, `max_amount_per_payout=1.5 SOL`, `quorum=1` for demo)
+- Predecessor single-oracle build at `971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF` is deprecated
 - Backend live with OpenAI streaming + rule-based fallback
 - Dashboard deployed on Vercel
 - NDVI ingestion currently simulated (deterministic per coordinates with arid-biome awareness); real Sentinel/MODIS integration is on the roadmap
@@ -49,7 +50,7 @@ A drought oracle layer that turns satellite NDVI and climate signals into verifi
 | Q4 2025 · done | AI oracle MVP with fallback agent and SSE streaming |
 | Q1 2026 · done | Colosseum Frontier submission |
 | Q1 2026 · done | M-of-N quorum + parameterized policy + idempotent attestation in source ([`contracts/programs/agri_subsidy`](contracts/programs/agri_subsidy/src/lib.rs)) |
-| Q2 2026 | Redeploy quorum build to Devnet under reserved `971Z…XpB` address |
+| ✅ Done | M-of-N quorum build deployed to Devnet at `2tBU…gkfK` |
 | Q2 2026 | First parametric-protocol integration (AMOCA-class) |
 | Q3 2026 | Real Sentinel / MODIS NDVI ingestion, mainnet beta |
 | Q3 2026 | Public-benefit pilot with one Central-Asian Ministry of Agriculture |
