@@ -155,6 +155,15 @@ jobs:
           node --version
           npm --version
           ls -la
+      # anchor 0.29's `[toolchain] anchor_version = "0.29.0"` in Anchor.toml
+      # triggers an avm dispatch on every `anchor` command. avm is not installed
+      # in CI (and installing it requires compiling from source, ~5 min), so we
+      # strip the section here. The pinned versions are also encoded in the
+      # workflow env (SOLANA_VERSION, ANCHOR_VERSION) so we keep deterministic
+      # tooling without going through avm.
+      - name: Strip [toolchain] section from Anchor.toml for CI
+        run: |
+          python3 -c "import re,sys,io,pathlib;p=pathlib.Path('Anchor.toml');s=p.read_text();s=re.sub(r'(?ms)^\\[toolchain\\].*?(?=^\\[|\\Z)','',s);p.write_text(s);print(s)"
       - name: Anchor build (BPF compile + IDL emit)
         run: anchor build
       - name: Anchor test (skip build, use embedded validator)
