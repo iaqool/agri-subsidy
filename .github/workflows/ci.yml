@@ -164,6 +164,12 @@ jobs:
       - name: Strip [toolchain] section from Anchor.toml for CI
         run: |
           python3 -c "import re,sys,io,pathlib;p=pathlib.Path('Anchor.toml');s=p.read_text();s=re.sub(r'(?ms)^\\[toolchain\\].*?(?=^\\[|\\Z)','',s);p.write_text(s);print(s)"
+      # The committed Cargo.lock is v4 (written by cargo 1.81+), but anchor 0.29
+      # builds with cargo-build-sbf which ships a rustc 1.75 toolchain that only
+      # understands lock format v3. Drop the lock so the BPF build regenerates
+      # one in a compatible format.
+      - name: Drop Cargo.lock so BPF cargo regenerates a compatible lockfile
+        run: rm -f Cargo.lock
       - name: Anchor build (BPF compile + IDL emit)
         run: anchor build
       - name: Anchor test (skip build, use embedded validator)
