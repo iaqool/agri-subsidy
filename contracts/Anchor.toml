@@ -5,6 +5,12 @@ solana_version = "1.18.0"
 [programs.devnet]
 agri_subsidy = "2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK"
 
+# Localnet uses the same program ID so `declare_id!` in lib.rs stays valid and
+# the workspace resolves identically in CI. Anchor will redeploy the program
+# to the local validator under this address during `anchor test`.
+[programs.localnet]
+agri_subsidy = "2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK"
+
 [registry]
 url = "https://api.apr.dev"
 
@@ -13,4 +19,7 @@ cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test.validator]
+startup_wait = 20000

@@ -64,10 +64,8 @@ jobs:
     defaults:
       run:
         working-directory: contracts
-    # rust-toolchain.toml in contracts/ pins 1.75.0 for Anchor BPF builds, but
-    # newer transitive deps (toml_datetime) require edition2024 which 1.75
-    # doesn't support. We override the toolchain just for `cargo check` here —
-    # this CI step verifies the lib compiles, not BPF targets.
+    # Stable toolchain is sufficient for the non-BPF `cargo check` smoke pass;
+    # the BPF build + mocha suite lives in the dedicated contracts-tests job.
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
@@ -82,3 +80,63 @@ jobs:
         run: cargo +stable check --package agri_subsidy
       - name: cargo clippy (informational)
         run: cargo +stable clippy --package agri_subsidy || true
+
+  contracts-tests:
+    # End-to-end mocha suite (contracts/tests/agri_subsidy.test.ts) running
+    # against an in-process solana-test-validator. This is the regression net
+    # for the M-of-N quorum / parameterized-policy / idempotent-attestation
+    # logic in lib.rs — the smoke `cargo check` job above will happily pass on
+    # changes that silently break the on-chain invariants.
+    name: Contracts (mocha)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      SOLANA_VERSION: v1.18.17
+      ANCHOR_VERSION: 0.29.0
+      ANCHOR_WALLET: /home/runner/.config/solana/id.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Cache Solana CLI
+        id: cache-solana
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.local/share/solana/install
+          key: solana-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        if: steps.cache-solana.outputs.cache-hit != 'true'
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${SOLANA_VERSION}/install)"
+      - name: Export Solana on PATH
+        run: echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - name: Generate ephemeral wallet keypair
+        run: |
+          mkdir -p "$(dirname "$ANCHOR_WALLET")"
+          solana-keygen new --no-bip39-passphrase --silent --force --outfile "$ANCHOR_WALLET"
+          solana config set --url localhost --keypair "$ANCHOR_WALLET"
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Cache Anchor CLI
+        id: cache-anchor
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cargo/bin/anchor
+          key: anchor-${{ env.ANCHOR_VERSION }}
+      - name: Install Anchor CLI
+        if: steps.cache-anchor.outputs.cache-hit != 'true'
+        run: cargo binstall --no-confirm anchor-cli@${ANCHOR_VERSION}
+      - name: Install node deps
+        run: npm install --no-audit --no-fund
+      - name: Run anchor test
+        run: anchor test --provider.cluster localnet
