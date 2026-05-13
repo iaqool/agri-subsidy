@@ -136,7 +136,26 @@ jobs:
       - name: Install Anchor CLI
         if: steps.cache-anchor.outputs.cache-hit != 'true'
         run: cargo binstall --no-confirm anchor-cli@${ANCHOR_VERSION}
+      # anchor 0.29's build/test paths shell out to `yarn` for IDL packaging
+      # even when the project itself uses npm, so we install it globally to
+      # avoid the spurious "No such file or directory" the binary returns on
+      # spawn("yarn") failure.
+      - name: Install yarn (used by anchor 0.29 IDL pipeline)
+        run: npm install -g yarn
       - name: Install node deps
         run: npm install --no-audit --no-fund
-      - name: Run anchor test
-        run: anchor test --provider.cluster localnet
+      - name: Toolchain diagnostics
+        run: |
+          set -x
+          which anchor solana cargo rustc node npm npx yarn cargo-build-sbf || true
+          anchor --version
+          solana --version
+          rustc --version
+          cargo --version
+          node --version
+          npm --version
+          ls -la
+      - name: Anchor build (BPF compile + IDL emit)
+        run: anchor build
+      - name: Anchor test (skip build, use embedded validator)
+        run: anchor test --skip-build --provider.cluster localnet
