@@ -5,6 +5,7 @@ so we don't exercise it from unit tests. These cover the in-process pieces
 of the bridge — the parts that regressed in production.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -61,3 +62,86 @@ def test_load_oracle_keypair_accepts_valid_json_array(monkeypatch):
     assert hasattr(kp, "pubkey")
     # round-trip: derived pubkey must match the source keypair
     assert str(kp.pubkey()) == str(fresh.pubkey())
+
+
+def test_bridge_result_legitimate_mock_is_not_degraded():
+    """PROGRAM_ID empty (demo mode) → MOCK but not degraded."""
+    r = bridge.SolanaBridgeResult("sig", is_mock=True, amount_sol=1.5)
+    assert r.is_mock is True
+    assert r.is_degraded is False
+    assert r.failure_reason is None
+    assert "MOCK" in repr(r)
+    assert "DEGRADED" not in repr(r)
+
+
+def test_bridge_result_degraded_carries_failure_reason():
+    """When PROGRAM_ID is set but LIVE TX fails, the response must record
+    is_degraded=True and a short failure_reason so downstream API surfaces
+    can distinguish demo MOCK from production-degraded MOCK."""
+    r = bridge.SolanaBridgeResult(
+        "sig",
+        is_mock=True,
+        amount_sol=1.5,
+        is_degraded=True,
+        failure_reason="RuntimeError: RPC error: blockhash not found",
+    )
+    assert r.is_mock is True
+    assert r.is_degraded is True
+    assert r.failure_reason is not None
+    assert "DEGRADED" in repr(r)
+
+
+def test_release_subsidy_falls_back_to_degraded_when_live_fails(monkeypatch):
+    """Regression guard for the PR #9 class of failure: when PROGRAM_ID is set
+    but the LIVE RPC call raises, release_subsidy used to return a vanilla MOCK
+    that was indistinguishable from a demo signature. It must now mark the
+    result as is_degraded=True with the underlying error captured.
+    """
+    monkeypatch.setattr(bridge, "PROGRAM_ID", "FakeProgramIdNotARealKey1111111111111111111")
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("RPC error: blockhash not found")
+
+    monkeypatch.setattr(bridge, "_send_live_transaction", _boom)
+
+    # Avoid real latency-imitation sleep slowing the test suite.
+    async def _noop_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(bridge.asyncio, "sleep", _noop_sleep)
+
+    result = asyncio.run(
+        bridge.release_subsidy(
+            farmer_pubkey="4pMnsypmRtd94bK94LXjFPWghpXN5WfCcLvnJhoUdX5z",
+            ai_score=72,
+            amount_sol=1.5,
+        )
+    )
+    assert result.is_mock is True
+    assert result.is_degraded is True
+    assert result.failure_reason is not None
+    assert "RuntimeError" in result.failure_reason
+    assert "blockhash not found" in result.failure_reason
+
+
+def test_release_subsidy_legitimate_demo_mock(monkeypatch):
+    """Empty PROGRAM_ID is the local-dev / demo path. Result must be MOCK but
+    not degraded — the dashboard amber chip is correct here, the red one is not.
+    """
+    monkeypatch.setattr(bridge, "PROGRAM_ID", "")
+
+    async def _noop_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(bridge.asyncio, "sleep", _noop_sleep)
+
+    result = asyncio.run(
+        bridge.release_subsidy(
+            farmer_pubkey="4pMnsypmRtd94bK94LXjFPWghpXN5WfCcLvnJhoUdX5z",
+            ai_score=72,
+            amount_sol=1.5,
+        )
+    )
+    assert result.is_mock is True
+    assert result.is_degraded is False
+    assert result.failure_reason is None

@@ -112,7 +112,17 @@ class _LRUEvalDB(OrderedDict):
 
 
 evaluations_db: _LRUEvalDB = _LRUEvalDB()  # evaluation_id -> {logs, result, ...}
-total_disbursed_sol: float = 0.0  # Накопительная сумма выплат
+# total_disbursed_sol counts SOL that actually settled on-chain (LIVE TX only).
+# MOCK / degraded-MOCK signatures do not credit this counter — they would create
+# a silent ledger drift where the API reports payouts that never happened.
+total_disbursed_sol: float = 0.0
+# Trust counters surfaced via /api/stats so operators / external monitors can
+# detect a regression like PR #9 (everything looks green in the UI but every
+# TX is actually MOCK).
+live_tx_count: int = 0
+mock_tx_count: int = 0
+degraded_tx_count: int = 0  # subset of mock_tx_count where PROGRAM_ID was set but LIVE failed
+fallback_eval_count: int = 0  # evaluations that ran in AI fallback mode
 _eval_lock = asyncio.Lock()
 
 # Idempotency: dedupe identical evaluation requests within a short window.
@@ -198,6 +208,14 @@ class StatsResponse(BaseModel):
     rejected: int
     pending: int
     total_disbursed_sol: float
+    # Trust signals: a healthy production deploy has live_tx_count > 0 and
+    # degraded_tx_count == 0. Any climb in degraded_tx_count or in
+    # fallback_eval_count means the system is silently downgrading and the
+    # operator should investigate before pitching against the dashboard.
+    live_tx_count: int = 0
+    mock_tx_count: int = 0
+    degraded_tx_count: int = 0
+    fallback_eval_count: int = 0
 
 
 # ─── Demo Seed Data ──────────────────────────────────────────────────────────────
@@ -425,6 +443,10 @@ async def get_stats():
         rejected=rejected,
         pending=pending,
         total_disbursed_sol=round(total_disbursed_sol, 3),
+        live_tx_count=live_tx_count,
+        mock_tx_count=mock_tx_count,
+        degraded_tx_count=degraded_tx_count,
+        fallback_eval_count=fallback_eval_count,
     )
 
 
@@ -474,6 +496,9 @@ async def run_evaluation_pipeline(
     4. Стриминг AI-рассуждений
     5. Обновление статуса фермера
     """
+    global total_disbursed_sol, live_tx_count, mock_tx_count
+    global degraded_tx_count, fallback_eval_count
+
     eval_data = evaluations_db[evaluation_id]
 
     def log(step: str, content: str):
@@ -551,6 +576,7 @@ async def run_evaluation_pipeline(
             farmers_db[wallet].score = result.score
 
         # Шаг 6: Solana Bridge — отправляем субсидию если одобрено
+        result_dict = result.model_dump()
         if result.approved:
             log(
                 "⛓️ Solana Bridge",
@@ -566,20 +592,55 @@ async def run_evaluation_pipeline(
                 farmers_db[wallet].tx_signature = bridge_result.signature
 
             async with _eval_lock:
-                global total_disbursed_sol
-                total_disbursed_sol += bridge_result.amount_sol
+                if bridge_result.is_mock:
+                    mock_tx_count += 1
+                    if bridge_result.is_degraded:
+                        degraded_tx_count += 1
+                else:
+                    # Only credit on-chain settled SOL to the disbursed total.
+                    # MOCK / degraded MOCK never moved real lamports and must
+                    # not climb the public ledger.
+                    total_disbursed_sol += bridge_result.amount_sol
+                    live_tx_count += 1
+                if result.is_fallback:
+                    fallback_eval_count += 1
 
-            mode_label = "[MOCK]" if bridge_result.is_mock else "[LIVE]"
+            if bridge_result.is_degraded:
+                mode_label = "[DEGRADED_MOCK]"
+            elif bridge_result.is_mock:
+                mode_label = "[MOCK]"
+            else:
+                mode_label = "[LIVE]"
             log(
-                "✅ TX Confirmed",
+                "✅ TX Confirmed" if not bridge_result.is_mock else "⚠️ TX Simulated",
                 f"{mode_label} TX: {bridge_result.signature[:20]}... | "
                 f"{bridge_result.amount_sol} SOL disbursed | "
-                f"Explorer: {bridge_result.explorer_url}",
+                f"Explorer: {bridge_result.explorer_url}"
+                + (
+                    f" | reason={bridge_result.failure_reason}"
+                    if bridge_result.failure_reason
+                    else ""
+                ),
             )
+
+            # Surface the bridge state on the verdict payload so the dashboard
+            # can render distinct chips for LIVE / MOCK / DEGRADED_MOCK instead
+            # of treating every TX as a green success.
+            result_dict["tx"] = {
+                "signature": bridge_result.signature,
+                "explorer_url": bridge_result.explorer_url,
+                "amount_sol": bridge_result.amount_sol,
+                "is_mock": bridge_result.is_mock,
+                "is_degraded": bridge_result.is_degraded,
+                "failure_reason": bridge_result.failure_reason,
+            }
         else:
             log("❌ TX Skipped", "Субсидия не одобрена — транзакция не отправлена.")
+            if result.is_fallback:
+                async with _eval_lock:
+                    fallback_eval_count += 1
 
-        eval_data["result"] = result.model_dump()
+        eval_data["result"] = result_dict
         eval_data["status"] = "done"
         eval_data["completed_at"] = datetime.utcnow().isoformat()
 

@@ -194,6 +194,19 @@ function DashboardApp() {
                         ⚡ Fallback mode
                       </p>
                     )}
+                    {result.tx?.is_degraded && (
+                      <p
+                        style={{ fontSize: 10, color: 'var(--clr-red)', marginTop: 4, fontWeight: 600 }}
+                        title={result.tx.failure_reason || 'LIVE TX failed, response is a simulated signature'}
+                      >
+                        🧪 Simulated TX (LIVE failed)
+                      </p>
+                    )}
+                    {result.tx?.is_mock && !result.tx?.is_degraded && (
+                      <p style={{ fontSize: 10, color: 'var(--clr-amber)', marginTop: 4 }}>
+                        🧪 Simulated TX (demo mode)
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -211,30 +224,63 @@ function DashboardApp() {
                 </div>
 
                 {/* TX for selected farmer */}
-                {selectedFarmer?.tx_signature && (
-                  <div style={{ marginTop: 14 }}>
-                    <p style={{ fontSize: 11, color: 'var(--clr-text-3)', marginBottom: 6 }}>Blockchain Record</p>
-                    <a
-                      href={`https://explorer.solana.com/tx/${selectedFarmer.tx_signature}?cluster=devnet`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        padding: '9px 12px', borderRadius: 8,
-                        background: 'var(--clr-primary-dim)',
-                        border: '1px solid rgba(99,102,241,0.28)',
-                        color: 'var(--clr-accent)', fontSize: 12, fontWeight: 600,
-                        textDecoration: 'none',
-                      }}
-                    >
-                      <span>⛓️</span>
-                      <span className="mono" style={{ fontSize: 11 }}>
-                        {selectedFarmer.tx_signature.slice(0, 16)}...
-                      </span>
-                      <span style={{ marginLeft: 'auto', fontSize: 10 }}>↗ Explorer</span>
-                    </a>
-                  </div>
-                )}
+                {selectedFarmer?.tx_signature && (() => {
+                  const isSim = !!(result.tx?.is_mock);
+                  const isDegraded = !!(result.tx?.is_degraded);
+                  const labelText = isDegraded
+                    ? 'Simulated Signature — LIVE TX failed'
+                    : isSim
+                      ? 'Simulated Signature — demo mode'
+                      : 'Blockchain Record';
+                  const accentColor = isDegraded
+                    ? 'var(--clr-red)'
+                    : isSim
+                      ? 'var(--clr-amber)'
+                      : 'var(--clr-accent)';
+                  const accentBg = isDegraded
+                    ? 'rgba(239,68,68,0.10)'
+                    : isSim
+                      ? 'rgba(245,158,11,0.10)'
+                      : 'var(--clr-primary-dim)';
+                  const accentBorder = isDegraded
+                    ? '1px solid rgba(239,68,68,0.32)'
+                    : isSim
+                      ? '1px solid rgba(245,158,11,0.32)'
+                      : '1px solid rgba(99,102,241,0.28)';
+                  return (
+                    <div style={{ marginTop: 14 }}>
+                      <p style={{ fontSize: 11, color: 'var(--clr-text-3)', marginBottom: 6 }}>
+                        {labelText}
+                      </p>
+                      <a
+                        href={`https://explorer.solana.com/tx/${selectedFarmer.tx_signature}?cluster=devnet`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '9px 12px', borderRadius: 8,
+                          background: accentBg,
+                          border: accentBorder,
+                          color: accentColor, fontSize: 12, fontWeight: 600,
+                          textDecoration: 'none',
+                        }}
+                      >
+                        <span>{isSim ? '🧪' : '⛓️'}</span>
+                        <span className="mono" style={{ fontSize: 11 }}>
+                          {selectedFarmer.tx_signature.slice(0, 16)}...
+                        </span>
+                        <span style={{ marginLeft: 'auto', fontSize: 10 }}>
+                          {isSim ? 'no on-chain TX' : '↗ Explorer'}
+                        </span>
+                      </a>
+                      {isDegraded && result.tx?.failure_reason && (
+                        <p style={{ fontSize: 10, color: 'var(--clr-text-3)', marginTop: 6 }}>
+                          reason: {result.tx.failure_reason}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
