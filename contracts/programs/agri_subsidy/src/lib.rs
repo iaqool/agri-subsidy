@@ -79,7 +79,10 @@ pub mod agri_subsidy {
 
         let slot = pool.oracle_count as usize;
         pool.oracles[slot] = new_oracle;
-        pool.oracle_count = pool.oracle_count.checked_add(1).unwrap();
+        pool.oracle_count = pool
+            .oracle_count
+            .checked_add(1)
+            .ok_or(AgriError::ArithmeticOverflow)?;
 
         emit!(OracleRegistered {
             pool: pool.key(),
@@ -128,7 +131,10 @@ pub mod agri_subsidy {
         farmer.total_received = 0;
 
         let pool = &mut ctx.accounts.pool;
-        pool.farmer_count = pool.farmer_count.checked_add(1).unwrap();
+        pool.farmer_count = pool
+            .farmer_count
+            .checked_add(1)
+            .ok_or(AgriError::ArithmeticOverflow)?;
 
         emit!(FarmerRegistered {
             wallet: farmer.wallet,
@@ -173,8 +179,11 @@ pub mod agri_subsidy {
             .ok_or(AgriError::AmountTooLarge)?;
         require!(new_total <= pool.max_amount_per_payout, AgriError::AmountTooLarge);
 
-        **ctx.accounts.pool.to_account_info().try_borrow_mut_lamports()? -= amount;
-        **ctx.accounts.farmer_wallet.to_account_info().try_borrow_mut_lamports()? += amount;
+        debit_pool_credit_wallet(
+            &ctx.accounts.pool.to_account_info(),
+            &ctx.accounts.farmer_wallet.to_account_info(),
+            amount,
+        )?;
 
         let farmer = &mut ctx.accounts.farmer_account;
         farmer.status = FarmerStatus::Approved;
@@ -182,7 +191,10 @@ pub mod agri_subsidy {
         farmer.total_received = new_total;
 
         let pool = &mut ctx.accounts.pool;
-        pool.total_disbursed = pool.total_disbursed.checked_add(amount).unwrap();
+        pool.total_disbursed = pool
+            .total_disbursed
+            .checked_add(amount)
+            .ok_or(AgriError::ArithmeticOverflow)?;
 
         emit!(FundsReleased {
             farmer: ctx.accounts.farmer_wallet.key(),
@@ -272,7 +284,10 @@ pub mod agri_subsidy {
         let slot = attestation.attesting_count as usize;
         require!(slot < MAX_ORACLES, AgriError::OracleSlotsExhausted);
         attestation.attesting_oracles[slot] = oracle_key;
-        attestation.attesting_count = attestation.attesting_count.checked_add(1).unwrap();
+        attestation.attesting_count = attestation
+            .attesting_count
+            .checked_add(1)
+            .ok_or(AgriError::ArithmeticOverflow)?;
 
         emit!(PayoutAttested {
             farmer: attestation.farmer,
@@ -325,8 +340,11 @@ pub mod agri_subsidy {
             .ok_or(AgriError::AmountTooLarge)?;
         require!(new_total <= pool.max_amount_per_payout, AgriError::AmountTooLarge);
 
-        **ctx.accounts.pool.to_account_info().try_borrow_mut_lamports()? -= amount;
-        **ctx.accounts.farmer_wallet.to_account_info().try_borrow_mut_lamports()? += amount;
+        debit_pool_credit_wallet(
+            &ctx.accounts.pool.to_account_info(),
+            &ctx.accounts.farmer_wallet.to_account_info(),
+            amount,
+        )?;
 
         let farmer = &mut ctx.accounts.farmer_account;
         farmer.status = FarmerStatus::Approved;
@@ -334,7 +352,10 @@ pub mod agri_subsidy {
         farmer.total_received = new_total;
 
         let pool = &mut ctx.accounts.pool;
-        pool.total_disbursed = pool.total_disbursed.checked_add(amount).unwrap();
+        pool.total_disbursed = pool
+            .total_disbursed
+            .checked_add(amount)
+            .ok_or(AgriError::ArithmeticOverflow)?;
 
         let attestation = &mut ctx.accounts.attestation;
         attestation.is_executed = true;
@@ -362,6 +383,36 @@ pub mod agri_subsidy {
 fn is_registered_oracle(pool: &SubsidyPool, candidate: &Pubkey) -> bool {
     let n = pool.oracle_count as usize;
     pool.oracles[..n].iter().any(|o| o == candidate)
+}
+
+/// Move `amount` lamports from the pool PDA to a farmer wallet while keeping
+/// the pool rent-exempt. Returns `PoolInsufficientFunds` if the debit would
+/// either underflow or leave the pool below the rent-exempt minimum, and
+/// `ArithmeticOverflow` if crediting the wallet would overflow `u64`. This
+/// replaces the previous `**lamports -= amount` mutation, which had neither
+/// guard and could brick the pool by dropping it below rent.
+fn debit_pool_credit_wallet<'info>(
+    pool: &AccountInfo<'info>,
+    wallet: &AccountInfo<'info>,
+    amount: u64,
+) -> Result<()> {
+    let rent = Rent::get()?;
+    let rent_exempt_min = rent.minimum_balance(pool.data_len());
+    let new_pool_balance = pool
+        .lamports()
+        .checked_sub(amount)
+        .ok_or(AgriError::PoolInsufficientFunds)?;
+    require!(
+        new_pool_balance >= rent_exempt_min,
+        AgriError::PoolInsufficientFunds,
+    );
+    let new_wallet_balance = wallet
+        .lamports()
+        .checked_add(amount)
+        .ok_or(AgriError::ArithmeticOverflow)?;
+    **pool.try_borrow_mut_lamports()? = new_pool_balance;
+    **wallet.try_borrow_mut_lamports()? = new_wallet_balance;
+    Ok(())
 }
 
 // ─── Account Structs ─────────────────────────────────────────────────────────
@@ -751,4 +802,10 @@ pub enum AgriError {
 
     #[msg("Attestation has already been executed")]
     AlreadyExecuted,
+
+    #[msg("Pool has insufficient funds for this payout (would underflow or drop below rent-exempt minimum)")]
+    PoolInsufficientFunds,
+
+    #[msg("Arithmetic overflow on a checked counter or balance update")]
+    ArithmeticOverflow,
 }

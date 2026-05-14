@@ -425,4 +425,154 @@ describe("agri_subsidy", () => {
       }
     });
   });
+
+  describe("rent-exempt + arithmetic guards", () => {
+    // Spins up an isolated pool whose only purpose is to verify that
+    // `release_funds_by_oracle` refuses to drop the pool PDA below the
+    // rent-exempt minimum. Uses a fresh authority + oracle so we don't
+    // disturb the main suite's pool (which has already been switched to
+    // quorum=2 by the M-of-N tests).
+    const guardAuthority = Keypair.generate();
+    const guardOracle = Keypair.generate();
+    const guardFarmer = Keypair.generate();
+    let guardPoolPda: PublicKey;
+    let guardPoolBump: number;
+    let guardFarmerPda: PublicKey;
+
+    before(async () => {
+      for (const kp of [guardAuthority, guardOracle, guardFarmer]) {
+        await provider.connection.confirmTransaction(
+          await provider.connection.requestAirdrop(kp.publicKey, 2 * LAMPORTS_PER_SOL)
+        );
+      }
+
+      [guardPoolPda, guardPoolBump] = PublicKey.findProgramAddressSync(
+        [Buffer.from("subsidy_pool"), guardAuthority.publicKey.toBuffer()],
+        program.programId
+      );
+      [guardFarmerPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("farmer"), guardPoolPda.toBuffer(), guardFarmer.publicKey.toBuffer()],
+        program.programId
+      );
+
+      await program.methods
+        .initializeSubsidyPool(guardPoolBump, MIN_SCORE, MAX_AMOUNT, 1)
+        .accounts({
+          authority: guardAuthority.publicKey,
+          oracle: guardOracle.publicKey,
+          pool: guardPoolPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([guardAuthority])
+        .rpc();
+
+      await program.methods
+        .registerFarmer("KZ-GUARD")
+        .accounts({
+          payer: guardAuthority.publicKey,
+          farmerWallet: guardFarmer.publicKey,
+          farmerAccount: guardFarmerPda,
+          pool: guardPoolPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([guardAuthority])
+        .rpc();
+    });
+
+    it("release_funds_by_oracle rejects when amount > pool.lamports (underflow path)", async () => {
+      // Pool was just initialised — it only holds its own rent. Any payout
+      // larger than that balance would have underflowed `lamports -= amount`
+      // in the previous implementation.
+      const amount = new anchor.BN(1 * LAMPORTS_PER_SOL);
+
+      try {
+        await program.methods
+          .releaseFundsByOracle(amount, 90)
+          .accounts({
+            oracle: guardOracle.publicKey,
+            farmerWallet: guardFarmer.publicKey,
+            farmerAccount: guardFarmerPda,
+            pool: guardPoolPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([guardOracle])
+          .rpc();
+        assert.fail("Should have thrown PoolInsufficientFunds");
+      } catch (e: any) {
+        assert.include(e.message, "PoolInsufficientFunds");
+      }
+    });
+
+    it("release_funds_by_oracle rejects when payout would drop pool below rent-exempt floor", async () => {
+      // Top the pool up to (rent_exempt + 0.05 SOL). A 0.1 SOL payout would
+      // succeed by raw lamport accounting but leave the pool below the
+      // rent-exempt minimum — which the guard must catch.
+      const poolInfo = await provider.connection.getAccountInfo(guardPoolPda);
+      assert.isNotNull(poolInfo, "guard pool must exist");
+      const rentExemptMin = await provider.connection.getMinimumBalanceForRentExemption(
+        poolInfo!.data.length
+      );
+      const currentBalance = await provider.connection.getBalance(guardPoolPda);
+      const targetBalance = rentExemptMin + 0.05 * LAMPORTS_PER_SOL;
+      const topUp = targetBalance - currentBalance;
+      if (topUp > 0) {
+        const ix = anchor.web3.SystemProgram.transfer({
+          fromPubkey: guardAuthority.publicKey,
+          toPubkey: guardPoolPda,
+          lamports: topUp,
+        });
+        const tx = new anchor.web3.Transaction().add(ix);
+        await anchor.web3.sendAndConfirmTransaction(provider.connection, tx, [guardAuthority]);
+      }
+
+      const payout = new anchor.BN(0.1 * LAMPORTS_PER_SOL);
+
+      try {
+        await program.methods
+          .releaseFundsByOracle(payout, 90)
+          .accounts({
+            oracle: guardOracle.publicKey,
+            farmerWallet: guardFarmer.publicKey,
+            farmerAccount: guardFarmerPda,
+            pool: guardPoolPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([guardOracle])
+          .rpc();
+        assert.fail("Should have thrown PoolInsufficientFunds");
+      } catch (e: any) {
+        assert.include(e.message, "PoolInsufficientFunds");
+      }
+    });
+
+    it("release_funds_by_oracle succeeds once pool is funded above (rent_exempt + amount)", async () => {
+      // Now fund the pool with enough headroom for one payout while staying
+      // above rent-exempt. The guard must let this through.
+      const payout = new anchor.BN(0.1 * LAMPORTS_PER_SOL);
+      const ix = anchor.web3.SystemProgram.transfer({
+        fromPubkey: guardAuthority.publicKey,
+        toPubkey: guardPoolPda,
+        lamports: 0.2 * LAMPORTS_PER_SOL,
+      });
+      const tx = new anchor.web3.Transaction().add(ix);
+      await anchor.web3.sendAndConfirmTransaction(provider.connection, tx, [guardAuthority]);
+
+      const before = await provider.connection.getBalance(guardFarmer.publicKey);
+
+      await program.methods
+        .releaseFundsByOracle(payout, 90)
+        .accounts({
+          oracle: guardOracle.publicKey,
+          farmerWallet: guardFarmer.publicKey,
+          farmerAccount: guardFarmerPda,
+          pool: guardPoolPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([guardOracle])
+        .rpc();
+
+      const after = await provider.connection.getBalance(guardFarmer.publicKey);
+      assert.isTrue(after - before >= payout.toNumber() - 100_000);
+    });
+  });
 });
