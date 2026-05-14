@@ -33,6 +33,7 @@ The backend runs without `OPENAI_API_KEY` and `OPENWEATHER_API_KEY`. It uses:
 | `MAX_FARMERS` | Registration cap | 10000 |
 | `MAX_EVALUATIONS` | Evaluation DB cap | 50000 |
 | `MAX_CONCURRENT_SSE` | SSE connection limit | 200 |
+| `DATABASE_URL` | Durable storage backend (SQLAlchemy async). Unset → in-memory dicts (legacy, OK for tests). `sqlite+aiosqlite:///./agri.db` → file-based SQLite (zero infra). `postgresql+asyncpg://user:pw@host/db` → hosted Postgres. Plain `sqlite:///…` / `postgresql://…` URLs are auto-normalised. Tables (`farmers`, `evaluations`, `disbursements`) are created on first boot. The disbursement ledger has `UNIQUE(signature)` so retries cannot double-credit `total_disbursed_sol`. | unset |
 | `OPENAI_API_KEY` | If unset / invalid → AI agent enters Fallback mode silently | unset |
 | `ORACLE_KEYPAIR_JSON` | Solana payer keypair (JSON array). If unset / unparseable → bridge enters MOCK mode silently | unset |
 | `SOLANA_RPC_URL` | Devnet/mainnet RPC | `https://api.devnet.solana.com` |

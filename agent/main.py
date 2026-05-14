@@ -20,6 +20,7 @@ from ndvi_service import fetch_historical_ndvi
 from scoring_engine import calculate_composite_score
 from ai_agent import stream_ai_evaluation, get_ai_verdict
 from solana_bridge import release_subsidy, get_transaction_status, SUBSIDY_AMOUNT_SOL
+import db as durable_storage
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,40 @@ app = FastAPI(
         else None
     ),
 )
+
+
+@app.on_event("startup")
+async def _startup_durable_storage():
+    """Initialise the durable-storage backend and rehydrate in-memory caches.
+
+    No-op when ``DATABASE_URL`` is unset — the agent then keeps using the
+    purely in-memory state it has always used (suitable for tests and quick
+    local smoke runs). When the env var is set, this creates tables on first
+    boot, then walks every persisted farmer row into ``farmers_db`` so the
+    dashboard reflects the persisted state immediately after a redeploy.
+    """
+    if not durable_storage.is_enabled():
+        return
+    await durable_storage.init_db()
+    async for row in durable_storage.hydrate_farmers_from_db():
+        farmers_db[row.wallet] = FarmerStatus(
+            wallet=row.wallet,
+            lat=row.lat,
+            lon=row.lon,
+            status=row.status,
+            score=row.score,
+            tx_signature=row.tx_signature,
+            label=row.label,
+        )
+    logger.info(
+        "Durable storage initialised, hydrated %d farmer(s) from DB",
+        len(farmers_db),
+    )
+
+
+@app.on_event("shutdown")
+async def _shutdown_durable_storage():
+    await durable_storage.shutdown_db()
 
 # Explicit origins (exact match) — local dev + the canonical Vercel deploy.
 # Override via CORS_ORIGINS for additional domains (custom hostnames, staging).
@@ -287,6 +322,13 @@ async def seed_demo_data():
             status="pending",
             label=f.get("label"),
         )
+        await durable_storage.upsert_farmer(
+            wallet=f["wallet"],
+            lat=f["lat"],
+            lon=f["lon"],
+            status="pending",
+            label=f.get("label"),
+        )
     return {
         "message": f"Загружено {len(DEMO_FARMERS)} демо-фермеров",
         "count": len(farmers_db),
@@ -313,6 +355,12 @@ async def register_farmer(data: FarmerRegistration):
         status="pending",
     )
     farmers_db[data.wallet_address] = farmer
+    await durable_storage.upsert_farmer(
+        wallet=data.wallet_address,
+        lat=data.region_lat,
+        lon=data.region_lon,
+        status="pending",
+    )
     return farmer
 
 
@@ -351,6 +399,12 @@ async def start_evaluation(req: EvaluateRequest, request: Request):
             lon=req.lon,
             status="pending",
         )
+        await durable_storage.upsert_farmer(
+            wallet=req.wallet_address,
+            lat=req.lat,
+            lon=req.lon,
+            status="pending",
+        )
 
     evaluations_db[evaluation_id] = {
         "wallet": req.wallet_address,
@@ -361,6 +415,12 @@ async def start_evaluation(req: EvaluateRequest, request: Request):
         "result": None,
         "started_at": datetime.utcnow().isoformat(),
     }
+    await durable_storage.create_evaluation(
+        evaluation_id=evaluation_id,
+        wallet=req.wallet_address,
+        lat=req.lat,
+        lon=req.lon,
+    )
 
     _idempotency_record(fingerprint, evaluation_id)
 
@@ -430,12 +490,32 @@ async def stream_evaluation(evaluation_id: str):
 
 @app.get("/api/stats", response_model=StatsResponse, summary="Статистика")
 async def get_stats():
-    """Агрегированная статистика по всем оценкам."""
+    """Агрегированная статистика по всем оценкам.
+
+    When durable storage is enabled, the disbursement-derived counters are
+    sourced from the SQL ``disbursements`` ledger so they survive restarts.
+    Otherwise we fall back to the in-process counters that the agent has
+    always maintained.
+    """
     global total_disbursed_sol
     all_farmers = list(farmers_db.values())
     approved = sum(1 for f in all_farmers if f.status == "approved")
     rejected = sum(1 for f in all_farmers if f.status == "rejected")
     pending = sum(1 for f in all_farmers if f.status == "pending")
+
+    if durable_storage.is_enabled():
+        stats = await durable_storage.disbursement_stats()
+        return StatsResponse(
+            total=len(all_farmers),
+            approved=approved,
+            rejected=rejected,
+            pending=pending,
+            total_disbursed_sol=round(stats["total_disbursed_sol"], 3),
+            live_tx_count=stats["live_tx_count"],
+            mock_tx_count=stats["mock_tx_count"],
+            degraded_tx_count=stats["degraded_tx_count"],
+            fallback_eval_count=stats["fallback_eval_count"],
+        )
 
     return StatsResponse(
         total=len(all_farmers),
@@ -574,6 +654,14 @@ async def run_evaluation_pipeline(
         if wallet in farmers_db:
             farmers_db[wallet].status = "approved" if result.approved else "rejected"
             farmers_db[wallet].score = result.score
+            await durable_storage.upsert_farmer(
+                wallet=wallet,
+                lat=farmers_db[wallet].lat,
+                lon=farmers_db[wallet].lon,
+                status=farmers_db[wallet].status,
+                score=farmers_db[wallet].score,
+                label=farmers_db[wallet].label,
+            )
 
         # Шаг 6: Solana Bridge — отправляем субсидию если одобрено
         result_dict = result.model_dump()
@@ -590,19 +678,46 @@ async def run_evaluation_pipeline(
 
             if wallet in farmers_db:
                 farmers_db[wallet].tx_signature = bridge_result.signature
+                await durable_storage.upsert_farmer(
+                    wallet=wallet,
+                    lat=farmers_db[wallet].lat,
+                    lon=farmers_db[wallet].lon,
+                    status=farmers_db[wallet].status,
+                    score=farmers_db[wallet].score,
+                    tx_signature=bridge_result.signature,
+                    label=farmers_db[wallet].label,
+                )
+
+            inserted = await durable_storage.record_disbursement(
+                evaluation_id=evaluation_id,
+                wallet=wallet,
+                signature=bridge_result.signature,
+                amount_sol=bridge_result.amount_sol,
+                is_mock=bridge_result.is_mock,
+                is_degraded=bridge_result.is_degraded,
+                is_fallback_eval=bool(result.is_fallback),
+                failure_reason=bridge_result.failure_reason,
+                explorer_url=bridge_result.explorer_url,
+            )
+            # When durable storage is enabled and the row was already present
+            # (a retry that re-uses the same signature), skip the in-memory
+            # counter bump so the LIVE total cannot drift on duplicate writes.
+            should_count = (not durable_storage.is_enabled()) or inserted
 
             async with _eval_lock:
                 if bridge_result.is_mock:
-                    mock_tx_count += 1
-                    if bridge_result.is_degraded:
-                        degraded_tx_count += 1
+                    if should_count:
+                        mock_tx_count += 1
+                        if bridge_result.is_degraded:
+                            degraded_tx_count += 1
                 else:
                     # Only credit on-chain settled SOL to the disbursed total.
                     # MOCK / degraded MOCK never moved real lamports and must
                     # not climb the public ledger.
-                    total_disbursed_sol += bridge_result.amount_sol
-                    live_tx_count += 1
-                if result.is_fallback:
+                    if should_count:
+                        total_disbursed_sol += bridge_result.amount_sol
+                        live_tx_count += 1
+                if result.is_fallback and should_count:
                     fallback_eval_count += 1
 
             if bridge_result.is_degraded:
@@ -644,6 +759,14 @@ async def run_evaluation_pipeline(
         eval_data["status"] = "done"
         eval_data["completed_at"] = datetime.utcnow().isoformat()
 
+        await durable_storage.update_evaluation(
+            evaluation_id=evaluation_id,
+            status="done",
+            logs=eval_data["logs"],
+            result=result_dict,
+            completed=True,
+        )
+
     except Exception as e:
 
         logger.error("Evaluation %s failed: %s", evaluation_id, e, exc_info=True)
@@ -651,3 +774,9 @@ async def run_evaluation_pipeline(
         eval_data["error"] = "Internal evaluation error"
         if wallet in farmers_db:
             farmers_db[wallet].status = "pending"
+        await durable_storage.update_evaluation(
+            evaluation_id=evaluation_id,
+            status="error",
+            error="Internal evaluation error",
+            completed=True,
+        )
