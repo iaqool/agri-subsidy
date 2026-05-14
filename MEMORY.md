@@ -15,11 +15,14 @@
   - Backend tests + CI: ruff, pytest (agent), npm lint + build (dashboard), `cargo +stable check`/`clippy` (contracts) via `.github/workflows/ci.yml`.
   - Local-dev SKILL at `.agents/skills/local-dev/SKILL.md` covers demo flow, silent-MOCK/Fallback detection, Devnet pool bootstrap procedure.
 - What was recently finished:
-  - PR #11 — deploy M-of-N quorum build to Devnet.
-  - PR #10 — Local-dev SKILL update with Devnet pool bootstrap procedure.
-  - PR #9 — prod on-chain `register_farmer` auto-init + AI verdict fallthrough.
-  - PR #8 — prod-testing knowledge added to local-dev SKILL.
-  - PR #7 — drought-scenario seed farmers + arid-biome aware NDVI sim + program-id doc fix.
+  - PR #17 — fly.io fallback deploy artifacts (dormant `fly.toml` + `agent/FLY_MIGRATION.md`) wired up after Railway's free-plan policy started rejecting builds.
+  - PR #16 — rent-exempt guard on pool drain + `.ok_or` on every checked counter. `debit_pool_credit_wallet` helper added in `programs/agri_subsidy/src/lib.rs`. Adversarial mocha tests live but local-only (toolchain triangle). **Deployed to Devnet at slot 462313048 with this session's upgrade.**
+  - PR #15 — anchor mocha harness wired up (`contracts/package.json`, `Anchor.toml [scripts]/[test]`). Full mocha suite stays local until anchor 0.30+/agave 2.x bump removes the toolchain triangle. Documented in `contracts/README.md`.
+  - PR #14 — README headline-honesty patch: clarified `quorum=1` demo state vs M-of-N source build so judges don't read it as already-running M-of-N.
+  - PR #13 — surface MOCK / DEGRADED-MOCK / Fallback in API + UI; `total_disbursed_sol` only credits on LIVE TX, MOCK/DEGRADED expose `is_mock`/`is_degraded`/`failure_reason` fields and matching chips.
+  - PR #12 — first `MEMORY.md`.
+  - PR #11 — deploy M-of-N quorum build to Devnet (original deploy, predates rent-guard).
+  - PR #10 / #9 / #8 / #7 — see earlier memory entries for context.
 - What is currently in progress:
   - None active in source. Roadmap next: first parametric-protocol integration (AMOCA-class) targeted Q2 2026.
 
@@ -30,6 +33,8 @@
 - [2024-Q1] M-of-N quorum + parameterized policy live on Devnet at `2tBU…gkfK`; single-oracle predecessor `971Z…ZjoF` is deprecated and must not be reintroduced.
 - [2024-Q1] `ADMIN_PUBKEY` is intentionally set to the oracle pubkey for the hackathon deploy so the bridge can sign `initialize_subsidy_pool`; production deploys must move this to a separate admin/multisig.
 - [2024-Q1] CI overrides `rust-toolchain.toml` (1.75.0) with `RUSTUP_TOOLCHAIN=stable` for `cargo check`/`clippy` only — BPF builds still use the pinned toolchain locally.
+- [2026-05-14] BPF build toolchain: agave 2.1.21 (platform-tools v1.43, rustc 1.79 internally) is the floor for compiling anchor 0.29 program code on Devin VMs. Solana 1.18.x + 2.0.x bundle rustc 1.75-dev, which cannot compile borsh 1.6+. Host cargo `Cargo.lock` v4 must be manually downgraded to v3 (sed) before invoking `cargo-build-sbf`. Documented in `contracts/README.md` toolchain-triangle section; the file regenerates after build, so commit nothing.
+- [2026-05-14] PR #16 rent-guard verified live on Devnet: smoke-test payout `4P67WQ5g6Z6wz6woSCSuT5ya5s6su4BU2WMQ8EgVJDGXKYhhycshL3F7Uy1dqiKa3DoP5ksDXVdRKcMC9Ea261nX` (finalized slot 462314276) drained pool from 4.00248 SOL to 2.50248 SOL with 1.5 SOL payout and stayed above rent-exempt minimum, exactly as `debit_pool_credit_wallet` enforces.
 
 ## Constraints
 - NDVI data is simulated (deterministic per coordinates with arid-biome awareness). Real Sentinel/MODIS ingestion is roadmap (Q3 2026), not in source — do not present sim output as live satellite data.
@@ -40,19 +45,26 @@
 - Do not weaken CORS, auth, oracle authorization, or pool/quorum guardrails for convenience. Do not expose `.env`, oracle keypair JSON, or Railway tokens in code, logs, or fixtures.
 
 ## Open Issues
+- **Railway down**: as of 2026-05-14 the primary backend `https://agri-subsidy-production.up.railway.app/` returns 404 ("Free plan deployments must be serverless"). Service has `Enable Serverless` toggled on but builds 022e7140 and prior keep failing. Fix: manual Redeploy on Railway, OR activate the dormant fly.io fallback per `agent/FLY_MIGRATION.md`.
 - NDVI simulation gap vs roadmap claim of real Sentinel/MODIS — documented; ship blocker for mainnet beta.
-- Silent MOCK/Fallback failure modes still depend on log inspection for detection — no UI surface yet.
-- `rust-toolchain.toml` pin (1.75.0) is incompatible with transitive deps that require edition2024; CI works around it, but local BPF builds remain on the pinned toolchain.
-- `MEMORY.md` did not exist before this session — historical decisions reconstructed from `README.md`, `.agents/skills/local-dev/SKILL.md`, and git log.
+- Silent MOCK/Fallback failure modes are now surfaced in the UI/API after PR #13 (`is_mock`, `is_degraded`, `failure_reason`).
+- `rust-toolchain.toml` pin (1.75.0) is incompatible with transitive deps that require edition2024; CI works around it for `cargo check`/`clippy`, BPF builds need agave 2.1.21 + manual Cargo.lock v3 downgrade.
+- Open questions from the council audit (blocking quorum cutover): (1) who holds `pool.authority`, (2) AMOCA/SeedFlow/NOVA outreach status, (3) `total_disbursed_sol` semantics, (4) oracle keypair sharing/M-of-N machine plan, (5) disbursement ledger retention, (6) demo wallet retirement plan post real-NDVI. See `/home/ubuntu/post-merge-audit.md` for full list. Owner: user.
 - No pre-commit hooks in repo (no `.pre-commit-config.yaml`, no `.husky/`, no `lefthook`); CI is the only gate.
 
 ## Next Steps
-- 1. Replace simulated NDVI with real Sentinel/MODIS ingestion (Q3 2026 milestone) — design for at-least-once fetch and idempotency on the attestation side.
-- 2. Surface Solana MOCK and AI Fallback modes in the dashboard verdict panel so silent-success failure modes are visible to operators and pitch viewers.
-- 3. First parametric-protocol integration (AMOCA-class) targeted Q2 2026 — define the public oracle-read contract before integrating.
+- 1. **Bring backend back up**: either manual Railway Redeploy with serverless mode confirmed, or activate fly.io fallback per `agent/FLY_MIGRATION.md`. Until then, `agri-subsidy.vercel.app` shows a broken UI even though the Devnet program + pool are fully operational.
+- 2. **Record 2-min demo video** using `/home/ubuntu/demo-video-script.md`. Live Devnet TX evidence already available (signature `4P67WQ5g6Z…`).
+- 3. **Answer the 6 open audit questions** so quorum cutover (`update_quorum` from 1 → 2) can be scheduled with a second oracle keypair on a separate machine.
+- 4. **Move program upgrade authority to Squads multisig** (P2 from solana.new audit). Right now `GPu53YV…wHdxN` is a single-key SPOF.
+- 5. **Durable storage**: Postgres (Supabase or fly.io managed) for `farmers_db` + `evaluations_db` + an audit-ledger of disbursements (currently process-memory; redeploy wipes everything).
+- 6. **RPC fallback in `solana_bridge.py`**: Helius primary + QuickNode secondary, with health-check failover. Today a Devnet RPC blip silently degrades the bridge to MOCK.
+- 7. Replace simulated NDVI with real Sentinel/MODIS ingestion (Q3 2026 roadmap) — design for at-least-once fetch and idempotency on the attestation side.
+- 8. First parametric-protocol integration (AMOCA-class) targeted Q2 2026 — define the public oracle-read contract before integrating.
 
 ## Last Session
-- Date: 2026-05-13
-- Summary: Session Start Protocol run on a fresh clone. `MEMORY.md` was missing per GELOAGENT.md Memory Discipline; this file was created from repository evidence (`README.md`, `.agents/skills/local-dev/SKILL.md`, `.github/workflows/ci.yml`, git log). No code changes.
-- Primary signal: `MEMORY.md` now present at repo root, aligned with README, SKILL, and Devnet deployment state.
-- Secondary signals: ruff/pytest/npm/cargo CI workflows confirmed unchanged; no lint or build run was needed for a documentation-only change.
+- Date: 2026-05-14
+- Summary: Three sessions chained. Session 1: council 3-lens synthesis (Product / Production-Readiness / Engineering) shipped PRs #13, #14, #15. Session 2: solana.new toolkit audit found two extra findings (rent-exempt guard + checked arithmetic), shipped PR #16; CI 6/6 green. Session 3: Railway broke under free-plan serverless policy; opened PR #17 with dormant fly.io fallback as insurance, then received the Devnet upgrade-authority keypair and rolled out PR #16 to Devnet end-to-end. `cargo-build-sbf` failed on agave 1.18.17 / 2.0.21 due to platform-tools rustc 1.75-dev; agave 2.1.21 (platform-tools v1.43) cleared the build. Program upgraded at slot 462313048 (TX `29SNAYSLGUeqp4Qc62vyaaSji1BsnPKPYbc5wcTcF53YvcyPb3Bhup456o5or3yJTGAq7adzVe5JtYqWPuP5XW26`), pool funded with 4 SOL (TX `D3JWAiWFZVzcuZscop1AFG8VeLgwdqKkHkvAeNGWYXvtQx7spKnqQbeU6SWyBt6JP46isvvstoZdFFb3jUtegUH`), and a fresh-wallet payout (`Fs5veBwKriHTE6eJ3APxm1e4nFspT7HjK8qKzmQ6AoKw`) confirmed the rent-guard live on chain (TX `4P67WQ5g6Z6wz6woSCSuT5ya5s6su4BU2WMQ8EgVJDGXKYhhycshL3F7Uy1dqiKa3DoP5ksDXVdRKcMC9Ea261nX`, finalized slot 462314276, pool drained 4.00248 → 2.50248 SOL above rent floor).
+- Primary signal: PR #16 code path exercised on Devnet without errors; finalized 1.5 SOL payout received; pool stayed above rent-exempt minimum exactly as `debit_pool_credit_wallet` enforces.
+- Secondary signals: CI green on PR #16 (6/6) + PR #17 (6/6); two demo wallets (Aralkum, Karakum) returned `AlreadyProcessed` (0x1779) from earlier on-chain evaluations and now require a fresh wallet for new payouts — expected, not a bug. AI agent ran in fallback mode (no OpenAI key on this VM); on prod with `OPENAI_API_KEY` set, the same flow produces `is_fallback: false`.
+- Audit deliverables on `~`: `/home/ubuntu/council-synthesis.md`, `/home/ubuntu/post-merge-audit.md`, `/home/ubuntu/demo-video-script.md`.
