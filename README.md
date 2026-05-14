@@ -2,7 +2,7 @@
 
 Dala Network is a drought-specific oracle layer on Solana. Parametric insurance protocols, reinsurers, and public farmer-relief programs subscribe to a single feed and a single Anchor-enforced payout rail — the same way DeFi protocols subscribe to Pyth, but for drought events.
 
-Live on Devnet · [agri-subsidy.vercel.app](https://agri-subsidy.vercel.app/) · Program: [`2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK`](https://explorer.solana.com/address/2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK?cluster=devnet) (M-of-N quorum build)
+Live on Devnet · [agri-subsidy.vercel.app](https://agri-subsidy.vercel.app/) · Program: [`2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK`](https://explorer.solana.com/address/2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK?cluster=devnet) (M-of-N source, initialized as 1-of-1 for the live demo)
 
 ## Track
 
@@ -35,12 +35,13 @@ A drought oracle layer that turns satellite NDVI and climate signals into verifi
 
 ## Status
 
-- Anchor program deployed on Devnet at [`2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK`](https://explorer.solana.com/address/2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK?cluster=devnet) — full **M-of-N quorum** build with parameterized policy, oracle registry, and idempotent attestation flow ([source](contracts/programs/agri_subsidy/src/lib.rs))
-- Subsidy pool PDA: [`AxnVgXUfeDk7nXXjhjvVuWPEvxh2SXBbDieUxfvJ64KL`](https://explorer.solana.com/address/AxnVgXUfeDk7nXXjhjvVuWPEvxh2SXBbDieUxfvJ64KL?cluster=devnet) (initialized with `min_score=55`, `max_amount_per_payout=1.5 SOL`, `quorum=1` for demo)
+- Anchor program deployed on Devnet at [`2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK`](https://explorer.solana.com/address/2tBU1bHZiydZGvcj3Dr5Sj3qQFDbQMrmCkYQt9SXgkfK?cluster=devnet) — the **M-of-N quorum** binary (parameterized policy, oracle registry, idempotent attestation) is on-chain ([source](contracts/programs/agri_subsidy/src/lib.rs)), but the live pool is initialized with `quorum=1` so a single AI oracle keypair can drive the demo end-to-end. Cutting over to a real 2-of-3 quorum requires provisioning the additional oracle keypairs and a `update_quorum` call — the contract path already exists.
+- Subsidy pool PDA: [`AxnVgXUfeDk7nXXjhjvVuWPEvxh2SXBbDieUxfvJ64KL`](https://explorer.solana.com/address/AxnVgXUfeDk7nXXjhjvVuWPEvxh2SXBbDieUxfvJ64KL?cluster=devnet) (initialized with `min_score=55`, `max_amount_per_payout=1.5 SOL`, `quorum=1` — single-signer for demo, see note above)
 - Predecessor single-oracle build at `971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF` is deprecated
-- Backend live with OpenAI streaming + rule-based fallback
-- Dashboard deployed on Vercel
+- Backend live with OpenAI streaming + rule-based fallback. `/api/stats` exposes `live_tx_count`, `mock_tx_count`, `degraded_tx_count`, and `fallback_eval_count` so a degraded MOCK does not silently inflate `total_disbursed_sol`
+- Dashboard deployed on Vercel; verdict card distinguishes LIVE TX from demo MOCK and from degraded MOCK (LIVE failed, returned a simulated signature)
 - NDVI ingestion currently simulated (deterministic per coordinates with arid-biome awareness); real Sentinel/MODIS integration is on the roadmap
+- Farmer state and evaluation history live in process memory and reset on each Railway redeploy; run `POST /api/demo/seed` to repopulate. A durable ledger is tracked on the roadmap.
 
 ## Roadmap
 
@@ -50,7 +51,7 @@ A drought oracle layer that turns satellite NDVI and climate signals into verifi
 | Q4 2025 · done | AI oracle MVP with fallback agent and SSE streaming |
 | Q1 2026 · done | Colosseum Frontier submission |
 | Q1 2026 · done | M-of-N quorum + parameterized policy + idempotent attestation in source ([`contracts/programs/agri_subsidy`](contracts/programs/agri_subsidy/src/lib.rs)) |
-| ✅ Done | M-of-N quorum build deployed to Devnet at `2tBU…gkfK` |
+| ✅ Done | M-of-N quorum binary deployed to Devnet at `2tBU…gkfK`; live pool initialized as 1-of-1 for the demo (quorum cutover pending additional oracle keypairs) |
 | Q2 2026 | First parametric-protocol integration (AMOCA-class) |
 | Q3 2026 | Real Sentinel / MODIS NDVI ingestion, mainnet beta |
 | Q3 2026 | Public-benefit pilot with one Central-Asian Ministry of Agriculture |
