@@ -219,6 +219,10 @@ docker run -p 8080:8080 --env-file .env dala-agent
 
 Frontend: `cd dashboard && npm run build` → serve `dist/` with any static hosting.
 
+Production targets:
+- **Primary**: Railway (`https://agri-subsidy-production.up.railway.app`).
+- **Fallback**: fly.io. The agent ships with `agent/fly.toml`; see `agent/FLY_MIGRATION.md` for the one-time setup when Railway is unavailable.
+
 ## Why Solana
 
 - Sub-second slot times and ~13s finalization make oracle updates economic at micro-policy scale

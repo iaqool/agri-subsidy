@@ -1,0 +1,57 @@
+# fly.io deployment config for the Dala Network agri-subsidy agent.
+#
+# This is a FALLBACK deployment target — primary production lives on Railway.
+# Activate this only if Railway's free-plan serverless mode keeps failing the
+# build (see commit history around 2026-05-13 when Railway tightened its
+# free-plan policy).
+#
+# How to deploy from a fresh fly.io account:
+#
+#   # 1. Install flyctl: `curl -L https://fly.io/install.sh | sh` (or brew install flyctl)
+#   # 2. From repo root:
+#   cd agent
+#   fly auth login
+#   fly launch --no-deploy --copy-config --name <your-unique-app-name>
+#   # 3. Wire secrets (do NOT commit values):
+#   fly secrets set \
+#     OPENAI_API_KEY="..." \
+#     OPENWEATHER_API_KEY="..." \
+#     ORACLE_KEYPAIR_JSON='[...]' \
+#     ADMIN_PUBKEY="..." \
+#     SOLANA_RPC_URL="https://api.devnet.solana.com" \
+#     CORS_ORIGINS="https://agri-subsidy.vercel.app,http://localhost:5173"
+#   # 4. Deploy:
+#   fly deploy
+#   # 5. Update Vercel env: set VITE_API_BASE_URL to https://<your-app-name>.fly.dev
+#   # 6. Redeploy the frontend on Vercel so the bundle picks up the new URL.
+#
+# Anything not in [env] below must be set via `fly secrets`.
+
+app = "dala-agri-subsidy-agent"  # replace with your own unique name via --name
+primary_region = "fra"            # Frankfurt — closest to KZ test wallets / EU users; pick "ams"/"lhr"/"iad" if preferred
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  # Public config only — secrets go through `fly secrets set`.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"   # stop on idle to match Railway free-plan behaviour
+  auto_start_machines = true    # cold-start on the first request
+  min_machines_running = 0      # 0 = full scale-to-zero, set to 1 for always-on
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"   # 256MB, fine for the agent (we're memory-bound at ~80MB resident)
+  memory = "512mb"         # bumped from 256 to be safe with OpenAI client + httpx pools
