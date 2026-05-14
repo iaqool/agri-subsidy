@@ -3,7 +3,17 @@
 ## Project
 - Name: Dala Network — Drought Oracle Layer for Solana (`iaqool/agri-subsidy`).
 - Goal: Drought-specific oracle on Solana that turns NDVI + weather + history into Anchor-enforced parametric payouts. Subscribers: parametric insurance protocols, reinsurers, public farmer-relief programs.
-- Current stage: Late-MVP / hackathon submission build (Colosseum Frontier). Devnet-live, Vercel + Railway deployment, NDVI ingestion still simulated.
+- Current stage: **Post-hackathon hardening.** Project advanced to Colosseum startup battle on the strength of the Devnet-live M-of-N build; user no longer needs the demo video. New goal is to push the project as close to "production-grade for serious investor / partner conversations" as possible.
+
+## Strategic Shift (2026-05-14)
+- Old north star: ship a credible hackathon demo (LIVE Devnet TX, honest MOCK chips, deployed M-of-N source). **Done.** PR #16 is live on chain, smoke-test payout `4P67WQ5g6Z…` finalized.
+- New north star: production-grade engineering posture for investor / parametric-protocol due diligence. Target grade: **B+ → A−** on the post-merge-audit rubric.
+- Roadmap tiers (see `/home/ubuntu/post-merge-audit.md` for the full rubric):
+  - **Tier 1 — production basics:** durable storage, RPC fallback, real 2-of-2 quorum on chain, Railway-or-fly.io brought back up.
+  - **Tier 2 — operations & trust:** Squads multisig under upgrade authority, Sentry + Discord error monitoring, anchor 0.30 + agave 2.x bump that finally puts mocha into CI.
+  - **Tier 3 — differentiation:** real Sentinel/MODIS NDVI ingestion replacing the simulator; first parametric-protocol (AMOCA-class) integration with a public oracle-read contract.
+- User declined the $5/mo fly.io spend and skipped the multisig keys question for now, so the work plan is biased toward zero-infra, code-only PRs first.
+- Current focus: **Tier 1.2 — durable storage**. SQLAlchemy 2.0 + Alembic, `DATABASE_URL` env var with `sqlite+aiosqlite:///./agri.db` as the default driver so no external infra is required to land the PR; same code switches to Supabase/fly.io Postgres later just by changing the URL. First externally-visible win: a `disbursements_ledger` table that survives redeploys, so the audit trail stops disappearing on every container restart.
 
 ## Current Status
 - What is already working:
