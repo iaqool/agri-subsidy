@@ -64,8 +64,8 @@ The last two are tagged in the dashboard with a 🏜️ flag and a yellow `DEMO`
 ## Testing on Prod
 
 - Frontend: `https://agri-subsidy.vercel.app/`
-- Backend:  `https://agri-subsidy-production.up.railway.app/`
-- `POST /api/demo/seed` is idempotent and **must be re-run after every Railway redeploy** — `farmers_db` is in-memory and resets on container restart.
+- Backend:  `https://agri-subsidy-production.up.railway.app/` (primary). If Railway is down or the free plan keeps refusing the build, a fly.io fallback is wired up — see `agent/FLY_MIGRATION.md` for the activation runbook.
+- `POST /api/demo/seed` is idempotent and **must be re-run after every backend redeploy** — `farmers_db` is in-memory and resets on container restart.
 - `GET /api/farmers` should return 7 entries; the two drought-scenario ones include a non-null `label` field — pre-PR-#7 backends will only return 5.
 
 ### Detecting silent MOCK / Fallback modes
