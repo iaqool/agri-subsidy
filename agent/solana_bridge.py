@@ -302,15 +302,38 @@ LAMPORTS_PER_SOL = 1_000_000_000
 
 
 class SolanaBridgeResult:
-    def __init__(self, signature: str, is_mock: bool, amount_sol: float):
+    def __init__(
+        self,
+        signature: str,
+        is_mock: bool,
+        amount_sol: float,
+        is_degraded: bool = False,
+        failure_reason: str | None = None,
+    ):
         self.signature = signature
         self.is_mock = is_mock
         self.amount_sol = amount_sol
         self.explorer_url = _mock_tx_url(signature)
+        # is_degraded is True only when PROGRAM_ID was set (LIVE intended) but
+        # the on-chain call failed and we silently fell back to a fake TX. This
+        # is the failure mode that broke production in PR #9: the dashboard
+        # showed an Explorer link, total_disbursed_sol grew, and nothing was
+        # actually settled on Devnet. failure_reason carries the short error
+        # string for operator/audit surfaces.
+        self.is_degraded = is_degraded
+        self.failure_reason = failure_reason
 
     def __repr__(self):
-        mode = "MOCK" if self.is_mock else "LIVE"
-        return f"<SolanaBridgeResult [{mode}] sig={self.signature[:16]}... amount={self.amount_sol} SOL>"
+        if self.is_degraded:
+            mode = "DEGRADED"
+        elif self.is_mock:
+            mode = "MOCK"
+        else:
+            mode = "LIVE"
+        return (
+            f"<SolanaBridgeResult [{mode}] sig={self.signature[:16]}... "
+            f"amount={self.amount_sol} SOL>"
+        )
 
 
 async def release_subsidy(
@@ -332,6 +355,7 @@ async def release_subsidy(
     amount_lamports = int(amount_sol * LAMPORTS_PER_SOL)
 
     # LIVE mode — если контракт задеплоен
+    degraded_reason: str | None = None
     if PROGRAM_ID:
         try:
             print(f"[bridge] Sending LIVE TX -> program={PROGRAM_ID[:8]}...")
@@ -339,13 +363,25 @@ async def release_subsidy(
             print(f"[bridge] TX confirmed: {sig[:16]}...")
             return SolanaBridgeResult(sig, is_mock=False, amount_sol=amount_sol)
         except Exception as e:
-            print(f"[bridge] Live TX failed ({e}), falling back to mock")
+            degraded_reason = f"{type(e).__name__}: {e}"[:200]
+            # Explicit prefix so operators can grep for production-degraded MOCK
+            # vs the legitimate demo MOCK (PROGRAM_ID empty).
+            print(f"[bridge] LIVE_TX_FAILED program={PROGRAM_ID[:8]}... reason={degraded_reason}")
 
-    # MOCK mode — демо без реального контракта
+    # MOCK mode — либо demo (PROGRAM_ID пуст), либо degraded fallback после ошибки LIVE
     await asyncio.sleep(random.uniform(0.8, 1.5))  # Имитация latency RPC
     sig = _mock_signature()
-    print(f"[bridge] MOCK TX generated: {sig[:16]}...")
-    return SolanaBridgeResult(sig, is_mock=True, amount_sol=amount_sol)
+    if degraded_reason is not None:
+        print(f"[bridge] DEGRADED_MOCK TX generated: {sig[:16]}... reason={degraded_reason}")
+    else:
+        print(f"[bridge] MOCK TX generated: {sig[:16]}...")
+    return SolanaBridgeResult(
+        sig,
+        is_mock=True,
+        amount_sol=amount_sol,
+        is_degraded=degraded_reason is not None,
+        failure_reason=degraded_reason,
+    )
 
 
 async def get_transaction_status(signature: str) -> dict:
