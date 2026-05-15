@@ -41,7 +41,7 @@ A drought oracle layer that turns satellite NDVI and climate signals into verifi
 - Backend live with OpenAI streaming + rule-based fallback. `/api/stats` exposes `live_tx_count`, `mock_tx_count`, `degraded_tx_count`, and `fallback_eval_count` so a degraded MOCK does not silently inflate `total_disbursed_sol`
 - Dashboard deployed on Vercel; verdict card distinguishes LIVE TX from demo MOCK and from degraded MOCK (LIVE failed, returned a simulated signature)
 - NDVI ingestion currently simulated (deterministic per coordinates with arid-biome awareness); real Sentinel/MODIS integration is on the roadmap
-- Farmer state and evaluation history live in process memory and reset on each Railway redeploy; run `POST /api/demo/seed` to repopulate. A durable ledger is tracked on the roadmap.
+- Farmer state and evaluation history are durable when `DATABASE_URL` is set (SQLAlchemy 2.0 async; defaults to `sqlite+aiosqlite:///./agri.db`, the same code path drives hosted Postgres via `postgresql+asyncpg://...`); the disbursement ledger is append-only with `UNIQUE` on the TX signature so retries cannot inflate `total_disbursed_sol`. When `DATABASE_URL` is unset the agent falls back to the legacy in-memory dicts (useful for tests and quick local smoke runs).
 
 ## Roadmap
 
