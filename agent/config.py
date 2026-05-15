@@ -11,6 +11,31 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
 # Solana Devnet settings
 SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+
+# Optional comma-separated extra RPC endpoints used as fallbacks when
+# SOLANA_RPC_URL is unhealthy (timeouts, HTTP 5xx, 429). Empty by default →
+# the bridge keeps its single-RPC behaviour. Set e.g.
+# SOLANA_RPC_URLS="https://devnet.helius-rpc.com/?api-key=XYZ,https://api.devnet.solana.com"
+# on the host to activate fail-over without code changes.
+_RPC_URLS_RAW = os.getenv("SOLANA_RPC_URLS", "")
+
+
+def _parse_rpc_endpoints() -> list[str]:
+    """Ordered, de-duplicated list of RPC endpoints. Primary first, then
+    any extras from SOLANA_RPC_URLS (in order). Empty strings are dropped.
+    """
+    extras = [u.strip() for u in _RPC_URLS_RAW.split(",") if u.strip()]
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in [SOLANA_RPC_URL, *extras]:
+        if url and url not in seen:
+            out.append(url)
+            seen.add(url)
+    return out
+
+
+SOLANA_RPC_ENDPOINTS: list[str] = _parse_rpc_endpoints()
+
 PROGRAM_ID = os.getenv("PROGRAM_ID", "")  # Заполнить после деплоя контракта
 ORACLE_KEYPAIR = os.getenv(
     "ORACLE_KEYPAIR_PATH", ""

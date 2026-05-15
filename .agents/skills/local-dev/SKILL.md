@@ -36,7 +36,8 @@ The backend runs without `OPENAI_API_KEY` and `OPENWEATHER_API_KEY`. It uses:
 | `DATABASE_URL` | Durable storage backend (SQLAlchemy async). Unset → in-memory dicts (legacy, OK for tests). `sqlite+aiosqlite:///./agri.db` → file-based SQLite (zero infra). `postgresql+asyncpg://user:pw@host/db` → hosted Postgres. Plain `sqlite:///…` / `postgresql://…` URLs are auto-normalised. Tables (`farmers`, `evaluations`, `disbursements`) are created on first boot. The disbursement ledger has `UNIQUE(signature)` so retries cannot double-credit `total_disbursed_sol`. | unset |
 | `OPENAI_API_KEY` | If unset / invalid → AI agent enters Fallback mode silently | unset |
 | `ORACLE_KEYPAIR_JSON` | Solana payer keypair (JSON array). If unset / unparseable → bridge enters MOCK mode silently | unset |
-| `SOLANA_RPC_URL` | Devnet/mainnet RPC | `https://api.devnet.solana.com` |
+| `SOLANA_RPC_URL` | Primary Devnet/mainnet RPC | `https://api.devnet.solana.com` |
+| `SOLANA_RPC_URLS` | Comma-separated extra RPC endpoints for fail-over when the primary is unhealthy (`httpx.HTTPError`, HTTP 408/425/429/5xx). Empty → bridge falls back to single-RPC behaviour. JSON-level `{"error": ...}` responses are NOT retried (they are logic errors — `release_subsidy` then surfaces them as honest degraded MOCK per PR #9). Operator activation pattern: `SOLANA_RPC_URLS=https://devnet.helius-rpc.com/?api-key=XYZ,https://api.devnet.solana.com`. Grep `[bridge] RPC_FALLOVER op=... endpoint=#N reason=...` in logs to see fail-overs. | unset |
 | `PROGRAM_ID` | Anchor program on Devnet | `971ZxLBhqc9p7rqCX5UkpknEo4AJNBdN8PTXmWHxzJoF` (live, single-oracle build) |
 | `ADMIN_PUBKEY` | Authority used to derive pool PDA: `[b"subsidy_pool", ADMIN_PUBKEY]`. The bridge re-reads this on every request. For the hackathon-demo deploy this is set to the **oracle** pubkey so we can sign `initialize_subsidy_pool` ourselves; in a production pool this would be a separate admin/multisig. | unset |
 

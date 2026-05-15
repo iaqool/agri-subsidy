@@ -13,14 +13,91 @@ import json
 import random
 from pathlib import Path
 
+import httpx
+
 from config import (
     SOLANA_RPC_URL,
+    SOLANA_RPC_ENDPOINTS,
     PROGRAM_ID,
     ORACLE_KEYPAIR,
     ORACLE_KEYPAIR_JSON,
     ADMIN_PUBKEY,
 )
 from solders.system_program import ID as SYS_PROGRAM_ID
+
+
+# ── RPC fallback helper ───────────────────────────────────────────────────────
+
+# HTTP status codes that indicate the endpoint is unhealthy rather than the
+# request being malformed. 408/425 are added belt+suspenders for proxies that
+# stamp them on transient timeouts.
+_RPC_FAILOVER_STATUS = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _rpc_endpoints() -> list[str]:
+    """Return the live endpoint list at call time so tests can monkeypatch
+    SOLANA_RPC_ENDPOINTS / SOLANA_RPC_URL on the bridge module.
+    """
+    if SOLANA_RPC_ENDPOINTS:
+        return SOLANA_RPC_ENDPOINTS
+    return [SOLANA_RPC_URL] if SOLANA_RPC_URL else []
+
+
+async def _rpc_post(client, payload: dict, *, op: str) -> dict:
+    """POST a JSON-RPC payload to the first healthy Solana RPC endpoint.
+
+    Iterates SOLANA_RPC_ENDPOINTS in order, failing over to the next URL on
+    network errors (httpx.HTTPError) or HTTP 408/425/429/5xx — the symptoms
+    of an unhealthy provider, not a bad request. JSON-level RPC errors
+    (`{"error": ...}` in a 200 response — e.g. "blockhash not found",
+    "invalid params") are returned as-is so callers preserve the existing
+    semantics: those are logic errors that retrying on another node will
+    not heal, and propagating them lets release_subsidy fall back to
+    degraded MOCK with an honest failure_reason (PR #9 contract).
+
+    Solana dedupes signed transactions by signature, so retrying
+    sendTransaction across endpoints with the same blockhash is idempotent.
+
+    If every endpoint fails, raises RuntimeError with the per-endpoint
+    causes joined together so the operator log line carries enough state
+    to triage without a live debugger.
+
+    Args:
+        client: shared httpx.AsyncClient (reuses its timeout / limits).
+        payload: JSON-RPC body, e.g. {"jsonrpc": "2.0", "method": ...}.
+        op: short label (e.g. "getLatestBlockhash") used in fail-over
+            log lines so operators can grep RPC_FALLOVER by call site.
+    """
+    endpoints = _rpc_endpoints()
+    if not endpoints:
+        raise RuntimeError(f"No RPC endpoint configured for {op}")
+
+    errors: list[str] = []
+    for idx, url in enumerate(endpoints):
+        try:
+            resp = await client.post(url, json=payload)
+        except httpx.HTTPError as exc:
+            reason = f"{type(exc).__name__}: {exc}"[:200]
+            print(
+                f"[bridge] RPC_FALLOVER op={op} endpoint=#{idx} reason={reason}"
+            )
+            errors.append(f"#{idx}: {reason}")
+            continue
+
+        if resp.status_code in _RPC_FAILOVER_STATUS:
+            reason = f"HTTP {resp.status_code}"
+            print(
+                f"[bridge] RPC_FALLOVER op={op} endpoint=#{idx} reason={reason}"
+            )
+            errors.append(f"#{idx}: {reason}")
+            continue
+
+        return resp.json()
+
+    raise RuntimeError(
+        f"All {len(endpoints)} RPC endpoints failed for {op}: "
+        + " | ".join(errors)
+    )
 
 
 # ── Mock TX Generator ─────────────────────────────────────────────────────────
@@ -76,16 +153,16 @@ def _load_oracle_keypair():
 
 async def _account_exists(client, pubkey_str: str) -> bool:
     """Проверяет через getAccountInfo, существует ли PDA на Devnet."""
-    resp = await client.post(
-        SOLANA_RPC_URL,
-        json={
+    data = await _rpc_post(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "getAccountInfo",
             "params": [pubkey_str, {"encoding": "base64"}],
         },
+        op="getAccountInfo",
     )
-    data = resp.json()
     return bool(data.get("result", {}).get("value"))
 
 
@@ -125,25 +202,26 @@ async def _send_register_farmer(
     ]
     instruction = Instruction(program_id=program_id, accounts=accounts, data=bytes(data))
 
-    rpc_resp = await client.post(
-        SOLANA_RPC_URL,
-        json={
+    rpc_data = await _rpc_post(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "getLatestBlockhash",
             "params": [{"commitment": "finalized"}],
         },
+        op="getLatestBlockhash",
     )
-    blockhash_str = rpc_resp.json()["result"]["value"]["blockhash"]
+    blockhash_str = rpc_data["result"]["value"]["blockhash"]
     recent_blockhash = Hash.from_string(blockhash_str)
 
     msg = Message([instruction], oracle_kp.pubkey())
     tx = Transaction([oracle_kp], msg, recent_blockhash)
     tx_b64 = base64.b64encode(bytes(tx)).decode()
 
-    send_resp = await client.post(
-        SOLANA_RPC_URL,
-        json={
+    send_result = await _rpc_post(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "sendTransaction",
@@ -152,26 +230,27 @@ async def _send_register_farmer(
                 {"encoding": "base64", "preflightCommitment": "confirmed"},
             ],
         },
+        op="sendTransaction",
     )
-    result = send_resp.json()
-    if "error" in result:
-        raise RuntimeError(f"register_farmer RPC error: {result['error']}")
-    sig = result["result"]
+    if "error" in send_result:
+        raise RuntimeError(f"register_farmer RPC error: {send_result['error']}")
+    sig = send_result["result"]
     print(f"[bridge] register_farmer TX: {sig[:16]}...")
 
     # Ждём подтверждения, чтобы release_funds_by_oracle видела PDA.
     for _ in range(20):  # до ~10с
         await asyncio.sleep(0.5)
-        status_resp = await client.post(
-            SOLANA_RPC_URL,
-            json={
+        status_data = await _rpc_post(
+            client,
+            {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "getSignatureStatuses",
                 "params": [[sig], {"searchTransactionHistory": True}],
             },
+            op="getSignatureStatuses",
         )
-        st = status_resp.json().get("result", {}).get("value", [None])[0]
+        st = status_data.get("result", {}).get("value", [None])[0]
         if st and st.get("confirmationStatus") in ("confirmed", "finalized"):
             return sig
         if st and st.get("err"):
@@ -201,7 +280,6 @@ async def _send_live_transaction(
         from solders.hash import Hash
         from solders.message import Message
         import struct
-        import httpx
 
         oracle_kp = _load_oracle_keypair()
 
@@ -251,16 +329,17 @@ async def _send_live_transaction(
             )
 
             # Получаем свежий blockhash
-            rpc_resp = await client.post(
-                SOLANA_RPC_URL,
-                json={
+            rpc_data = await _rpc_post(
+                client,
+                {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "getLatestBlockhash",
                     "params": [{"commitment": "finalized"}],
                 },
+                op="getLatestBlockhash",
             )
-            blockhash_str = rpc_resp.json()["result"]["value"]["blockhash"]
+            blockhash_str = rpc_data["result"]["value"]["blockhash"]
             recent_blockhash = Hash.from_string(blockhash_str)
 
             # Строим транзакцию
@@ -273,9 +352,9 @@ async def _send_live_transaction(
             tx_bytes = bytes(tx)
             tx_b64 = base64.b64encode(tx_bytes).decode()
 
-            send_resp = await client.post(
-                SOLANA_RPC_URL,
-                json={
+            send_result = await _rpc_post(
+                client,
+                {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "sendTransaction",
@@ -284,12 +363,12 @@ async def _send_live_transaction(
                         {"encoding": "base64", "preflightCommitment": "confirmed"},
                     ],
                 },
+                op="sendTransaction",
             )
-            result = send_resp.json()
-            if "error" in result:
-                raise RuntimeError(f"RPC error: {result['error']}")
+            if "error" in send_result:
+                raise RuntimeError(f"RPC error: {send_result['error']}")
 
-            return result["result"]  # TX signature
+            return send_result["result"]  # TX signature
 
     except ImportError:
         raise RuntimeError("solders not installed correctly")
@@ -399,19 +478,17 @@ async def get_transaction_status(signature: str) -> dict:
         }
 
     try:
-        import httpx
-
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                SOLANA_RPC_URL,
-                json={
+            data = await _rpc_post(
+                client,
+                {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "getSignatureStatuses",
                     "params": [[signature], {"searchTransactionHistory": True}],
                 },
+                op="getSignatureStatuses",
             )
-            data = resp.json()
             tx_status = data["result"]["value"][0]
             if tx_status is None:
                 return {"status": "not_found", "is_mock": False}
