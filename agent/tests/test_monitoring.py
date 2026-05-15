@@ -8,8 +8,9 @@ MOCK surfaced on the verdict) is independent of whether Discord / Sentry
 land — these tests assert exactly that.
 """
 
+import asyncio
+
 import httpx
-import pytest
 
 import monitoring
 
@@ -80,8 +81,7 @@ def test_init_sentry_survives_missing_sdk(monkeypatch):
 # ─── Discord notify — degraded MOCK ─────────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_notify_degraded_mock_noop_when_webhook_unset(monkeypatch):
+def test_notify_degraded_mock_noop_when_webhook_unset(monkeypatch):
     """Without DISCORD_WEBHOOK_URL, notify_degraded_mock is a fast no-op
     that returns False — and crucially does not perform any HTTP request.
     """
@@ -103,18 +103,19 @@ async def test_notify_degraded_mock_noop_when_webhook_unset(monkeypatch):
             raise AssertionError("should not POST when webhook unset")
 
     monkeypatch.setattr(httpx, "AsyncClient", _ShouldNotPost)
-    result = await monitoring.notify_degraded_mock(
-        wallet="A" * 44,
-        signature="sig" * 10,
-        failure_reason="all RPCs down",
-        amount_sol=0.1,
+    result = asyncio.run(
+        monitoring.notify_degraded_mock(
+            wallet="A" * 44,
+            signature="sig" * 10,
+            failure_reason="all RPCs down",
+            amount_sol=0.1,
+        )
     )
     assert result is False
     assert called["post"] is False
 
 
-@pytest.mark.asyncio
-async def test_notify_degraded_mock_posts_payload(monkeypatch):
+def test_notify_degraded_mock_posts_payload(monkeypatch):
     """With DISCORD_WEBHOOK_URL set, the webhook receives a payload with the
     expected structure (single embed, fields contain wallet / signature /
     failure_reason / amount). We assert the shape, not the cosmetics — the
@@ -142,12 +143,14 @@ async def test_notify_degraded_mock_posts_payload(monkeypatch):
             return httpx.Response(204, request=req)
 
     monkeypatch.setattr(httpx, "AsyncClient", _ScriptedClient)
-    result = await monitoring.notify_degraded_mock(
-        wallet="WALLET" + "X" * 38,
-        signature="MOCK_SIG_ABCDEFG",
-        failure_reason="All 2 RPC endpoints failed",
-        amount_sol=0.25,
-        evaluation_id="eval_42",
+    result = asyncio.run(
+        monitoring.notify_degraded_mock(
+            wallet="WALLET" + "X" * 38,
+            signature="MOCK_SIG_ABCDEFG",
+            failure_reason="All 2 RPC endpoints failed",
+            amount_sol=0.25,
+            evaluation_id="eval_42",
+        )
     )
     assert result is True
     assert captured["url"] == "https://discord.example/webhook"
@@ -166,8 +169,7 @@ async def test_notify_degraded_mock_posts_payload(monkeypatch):
     assert "eval_42" in flat
 
 
-@pytest.mark.asyncio
-async def test_notify_degraded_mock_swallows_network_errors(monkeypatch):
+def test_notify_degraded_mock_swallows_network_errors(monkeypatch):
     """If Discord is down / throttling / DNS-broken, the notifier must NOT
     raise. The fire-and-forget caller would only log a warning anyway, but
     we still guarantee the boundary so a hot path can't be poisoned.
@@ -190,17 +192,18 @@ async def test_notify_degraded_mock_swallows_network_errors(monkeypatch):
             raise httpx.ConnectError("discord down")
 
     monkeypatch.setattr(httpx, "AsyncClient", _FailingClient)
-    result = await monitoring.notify_degraded_mock(
-        wallet="A" * 44,
-        signature="MOCK",
-        failure_reason="rpc fail",
-        amount_sol=0.5,
+    result = asyncio.run(
+        monitoring.notify_degraded_mock(
+            wallet="A" * 44,
+            signature="MOCK",
+            failure_reason="rpc fail",
+            amount_sol=0.5,
+        )
     )
     assert result is False
 
 
-@pytest.mark.asyncio
-async def test_notify_degraded_mock_swallows_5xx(monkeypatch):
+def test_notify_degraded_mock_swallows_5xx(monkeypatch):
     """A 500/429 from Discord (rate limit / outage) returns False without
     raising. The hot path keeps moving.
     """
@@ -223,11 +226,13 @@ async def test_notify_degraded_mock_swallows_5xx(monkeypatch):
             return httpx.Response(503, request=req)
 
     monkeypatch.setattr(httpx, "AsyncClient", _ServerErrorClient)
-    result = await monitoring.notify_degraded_mock(
-        wallet="A" * 44,
-        signature="MOCK",
-        failure_reason="rpc fail",
-        amount_sol=0.5,
+    result = asyncio.run(
+        monitoring.notify_degraded_mock(
+            wallet="A" * 44,
+            signature="MOCK",
+            failure_reason="rpc fail",
+            amount_sol=0.5,
+        )
     )
     assert result is False
 
@@ -235,17 +240,15 @@ async def test_notify_degraded_mock_swallows_5xx(monkeypatch):
 # ─── Discord notify — critical exception ────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_notify_critical_noop_when_webhook_unset(monkeypatch):
+def test_notify_critical_noop_when_webhook_unset(monkeypatch):
     monkeypatch.setattr(monitoring, "DISCORD_WEBHOOK_URL", "")
-    result = await monitoring.notify_critical(
-        where="eval_1", error=RuntimeError("boom")
+    result = asyncio.run(
+        monitoring.notify_critical(where="eval_1", error=RuntimeError("boom"))
     )
     assert result is False
 
 
-@pytest.mark.asyncio
-async def test_notify_critical_posts_with_error_class_and_message(monkeypatch):
+def test_notify_critical_posts_with_error_class_and_message(monkeypatch):
     """The critical payload must surface both the exception class name AND
     its message so an operator can triage from the Discord channel alone
     (Sentry has the full stack — Discord is the at-a-glance alert).
@@ -271,8 +274,10 @@ async def test_notify_critical_posts_with_error_class_and_message(monkeypatch):
             return httpx.Response(204, request=req)
 
     monkeypatch.setattr(httpx, "AsyncClient", _ScriptedClient)
-    result = await monitoring.notify_critical(
-        where="eval_99", error=ValueError("schema mismatch on row 17")
+    result = asyncio.run(
+        monitoring.notify_critical(
+            where="eval_99", error=ValueError("schema mismatch on row 17")
+        )
     )
     assert result is True
     flat = " | ".join(
@@ -309,19 +314,23 @@ def test_truncate_at_exact_limit_unchanged():
 # ─── fire_and_forget ─────────────────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_fire_and_forget_schedules_task():
+def test_fire_and_forget_schedules_task():
     """fire_and_forget must hand the coroutine to the running event loop and
-    return a Task so the caller can opt to await in tests.
+    return a Task so the caller can opt to await in tests. We exercise it
+    inside an asyncio.run boundary to match the rest of the suite (no
+    pytest-asyncio dependency).
     """
     ran = {"yes": False}
 
     async def _work():
         ran["yes"] = True
 
-    task = monitoring.fire_and_forget(_work())
-    assert task is not None
-    await task
+    async def _driver():
+        task = monitoring.fire_and_forget(_work())
+        assert task is not None
+        await task
+
+    asyncio.run(_driver())
     assert ran["yes"] is True
 
 
