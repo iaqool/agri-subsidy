@@ -21,6 +21,7 @@ from scoring_engine import calculate_composite_score
 from ai_agent import stream_ai_evaluation, get_ai_verdict
 from solana_bridge import release_subsidy, get_transaction_status, SUBSIDY_AMOUNT_SOL
 import db as durable_storage
+import monitoring
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,18 @@ app = FastAPI(
         else None
     ),
 )
+
+
+@app.on_event("startup")
+async def _startup_monitoring():
+    """Initialise Sentry SDK when SENTRY_DSN is set; otherwise a no-op.
+
+    Mirrors the durable-storage / RPC-fallback opt-in pattern: code lands
+    once, the host activates by exporting the env var. With Sentry off the
+    only cost is one function call at boot. Discord notifier needs no init
+    — it is checked at emission time.
+    """
+    monitoring.init_sentry()
 
 
 @app.on_event("startup")
@@ -721,6 +734,22 @@ async def run_evaluation_pipeline(
                     fallback_eval_count += 1
 
             if bridge_result.is_degraded:
+                # Fire-and-forget Discord alert. No-op when
+                # DISCORD_WEBHOOK_URL is unset; never blocks the SSE stream
+                # or the verdict response. PR #9 honesty contract is
+                # preserved — the result dict already carries is_degraded /
+                # failure_reason regardless of whether the alert lands.
+                monitoring.fire_and_forget(
+                    monitoring.notify_degraded_mock(
+                        wallet=wallet,
+                        signature=bridge_result.signature,
+                        failure_reason=bridge_result.failure_reason,
+                        amount_sol=bridge_result.amount_sol,
+                        evaluation_id=evaluation_id,
+                    )
+                )
+
+            if bridge_result.is_degraded:
                 mode_label = "[DEGRADED_MOCK]"
             elif bridge_result.is_mock:
                 mode_label = "[MOCK]"
@@ -770,6 +799,13 @@ async def run_evaluation_pipeline(
     except Exception as e:
 
         logger.error("Evaluation %s failed: %s", evaluation_id, e, exc_info=True)
+        # Sentry will capture e automatically via the FastAPI integration
+        # (init'd in _startup_monitoring). Discord gets a fire-and-forget
+        # alert so the operator channel surfaces unhandled exceptions even
+        # without opening Sentry. Both are no-op when the env vars are unset.
+        monitoring.fire_and_forget(
+            monitoring.notify_critical(where=evaluation_id, error=e)
+        )
         eval_data["status"] = "error"
         eval_data["error"] = "Internal evaluation error"
         if wallet in farmers_db:

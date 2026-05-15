@@ -148,6 +148,10 @@ agri-subsidy/
 | `ADMIN_KEYPAIR_PATH` | For init | Path to deployer keypair |
 | `SOLANA_RPC_URL` | No | Primary Solana JSON-RPC endpoint. Defaults to `https://api.devnet.solana.com` |
 | `SOLANA_RPC_URLS` | No | Comma-separated extra RPC endpoints used as fallbacks when the primary is unhealthy (network errors, HTTP 5xx, 429). Empty → single-RPC behaviour. Example: `https://devnet.helius-rpc.com/?api-key=XYZ,https://api.devnet.solana.com` |
+| `SENTRY_DSN` | No | Sentry DSN. Empty → Sentry disabled (no-op). When set, the FastAPI integration auto-captures unhandled exceptions; performance tracing is off (`traces_sample_rate=0`) to keep the per-request cost at "tag + capture" only |
+| `SENTRY_ENVIRONMENT` | No | `production` / `staging` / `local` tag used on Sentry events. Defaults to `local` |
+| `DISCORD_WEBHOOK_URL` | No | Discord incoming-webhook URL. Empty → no Discord alerts (no-op). When set, the agent fires fire-and-forget alerts on degraded-MOCK fallbacks and unhandled eval-pipeline exceptions; the webhook URL is a credential, never commit a real one |
+| `DISCORD_ALERT_USERNAME` | No | Display name on the Discord webhook. Defaults to `Dala Alert` |
 
 ### Frontend (`dashboard/.env`)
 
