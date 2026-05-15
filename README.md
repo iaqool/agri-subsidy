@@ -146,7 +146,8 @@ agri-subsidy/
 | `ORACLE_PUBKEY` | For init | Oracle public key |
 | `ADMIN_PUBKEY` | For live TX | Deployer wallet public key |
 | `ADMIN_KEYPAIR_PATH` | For init | Path to deployer keypair |
-| `SOLANA_RPC_URL` | No | Defaults to `https://api.devnet.solana.com` |
+| `SOLANA_RPC_URL` | No | Primary Solana JSON-RPC endpoint. Defaults to `https://api.devnet.solana.com` |
+| `SOLANA_RPC_URLS` | No | Comma-separated extra RPC endpoints used as fallbacks when the primary is unhealthy (network errors, HTTP 5xx, 429). Empty → single-RPC behaviour. Example: `https://devnet.helius-rpc.com/?api-key=XYZ,https://api.devnet.solana.com` |
 
 ### Frontend (`dashboard/.env`)
 
