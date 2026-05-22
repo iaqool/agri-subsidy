@@ -45,6 +45,15 @@ ORACLE_KEYPAIR_JSON = os.getenv(
 )  # JSON-массив байт keypair (для cloud deploy без файла)
 ADMIN_PUBKEY = os.getenv("ADMIN_PUBKEY", "")
 
+# ── Monitoring (opt-in, off by default) ──────────────────────────────────────
+# All four variables follow the same pattern as DATABASE_URL / SOLANA_RPC_URLS:
+# empty = monitoring disabled, set on the host to activate. Keep the values out
+# of logs — DSN and webhook URL both carry credentials in their query string.
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "local")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_ALERT_USERNAME = os.getenv("DISCORD_ALERT_USERNAME", "Dala Alert")
+
 if not OPENAI_API_KEY:
     print("[config] OPENAI_API_KEY not found - fallback mode will be used")
 else:
